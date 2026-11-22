@@ -122,3 +122,97 @@ final class FakeBuilder: ReportBuilding, @unchecked Sendable {
         await c.cancel()
     }
 }
+
+@MainActor final class GatedService: SessionService {
+    var startCount = 0, stopped = false
+    var waiting = false
+    private var cont: CheckedContinuation<Void, Never>?
+    func start(context: SessionContext) async throws {
+        startCount += 1
+        waiting = true
+        await withCheckedContinuation { cont = $0 }
+        waiting = false
+    }
+    func stop() async { stopped = true }
+    func release() { cont?.resume(); cont = nil }
+}
+
+@MainActor final class GatedCapture: FrameCapturing {
+    var displays: [DisplayGeometry] = []
+    var hold = false
+    var held = false
+    var stopped = false
+    private var cont: CheckedContinuation<Void, Never>?
+    func start(context: SessionContext) async throws {}
+    func stop() async { stopped = true }
+    func captureKeyframe(reason: KeyframeReason) async -> TimelineEvent? {
+        if hold {
+            hold = false
+            held = true
+            await withCheckedContinuation { cont = $0 }
+            held = false
+        }
+        return .keyframe(KeyframeRef(id: UUID(), file: "\(reason).png", t: 1, displayID: 1), reason: reason)
+    }
+    func release() { cont?.resume(); cont = nil }
+}
+
+@MainActor @Suite struct SessionControllerOverlapTests {
+    private func make(service: GatedService, capture: any FrameCapturing, builder: FakeBuilder = FakeBuilder()) -> (SessionController, URL) {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let c = SessionController(capture: capture, services: [service], outputRoot: { root }, reportBuilder: { builder },
+                                  now: { Date(timeIntervalSince1970: 1_763_821_800) }, tickInterval: .seconds(3600), clickDelay: .zero)
+        return (c, root)
+    }
+
+    @Test func secondStartWhileStartingIsIgnored() async {
+        let service = GatedService()
+        let (c, root) = make(service: service, capture: GatedCapture())
+        let first = Task { await c.start(mode: .manual) }
+        await waitUntil { service.waiting }
+        await c.start(mode: .manual)
+        #expect(service.startCount == 1)
+        service.release()
+        await first.value
+        #expect(c.isRecording)
+        let contents = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
+        #expect(contents.count == 1)
+        await c.cancel()
+    }
+
+    @Test func cancelDuringStartLeavesIdle() async {
+        let service = GatedService(), capture = GatedCapture()
+        let (c, root) = make(service: service, capture: capture)
+        let first = Task { await c.start(mode: .manual) }
+        await waitUntil { service.waiting }
+        await c.cancel()
+        service.release()
+        await first.value
+        #expect(c.state == .idle)
+        #expect(service.stopped && capture.stopped)
+        let contents = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
+        #expect(contents.isEmpty)
+    }
+
+    @Test func staleKeyframeFromCancelledSessionIsDropped() async throws {
+        let service = GatedService(), capture = GatedCapture(), builder = FakeBuilder()
+        let (c, _) = make(service: service, capture: capture, builder: builder)
+        let first = Task { await c.start(mode: .manual) }
+        await waitUntil { service.waiting }
+        service.release()
+        await first.value
+        capture.hold = true
+        c.markMoment()
+        await waitUntil { capture.held }
+        await c.cancel()
+        let second = Task { await c.start(mode: .manual) }
+        await waitUntil { service.waiting }
+        service.release()
+        await second.value
+        capture.release()
+        try? await Task.sleep(for: .milliseconds(50))
+        await c.stop()
+        let doc = try #require(builder.document)
+        #expect(!doc.events.contains { if case .keyframe(_, .mark) = $0 { true } else { false } })
+    }
+}

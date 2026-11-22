@@ -64,6 +64,12 @@ public final class SessionController {
     @ObservationIgnored private var started: [any SessionService] = []
     @ObservationIgnored private var tickTask: Task<Void, Never>?
     @ObservationIgnored private var accepting = false
+    /// True while `start` awaits service startup (state is not yet `.recording`).
+    @ObservationIgnored private var starting = false
+    /// Set by `cancel` during startup; honoured when startup finishes.
+    @ObservationIgnored private var pendingCancel = false
+    /// Identifies the current session; bumped whenever a session begins or ends so stale async work can detect it.
+    @ObservationIgnored private var generation = 0
 
     public init(capture: any FrameCapturing, services: [any SessionService],
                 outputRoot: @escaping @MainActor () -> URL,
@@ -89,11 +95,18 @@ public final class SessionController {
         case .recording, .finalizing: return
         default: break
         }
+        guard !starting else { return }
+        starting = true
+        pendingCancel = false
+        generation += 1
+        let gen = generation
         let date = now()
         let folder: SessionFolder
         do {
             folder = try SessionFolder.create(root: outputRoot(), slug: "session", date: date)
         } catch {
+            starting = false
+            pendingCancel = false
             state = .failed("Couldn't create the session folder: \(error.localizedDescription)")
             return
         }
@@ -115,20 +128,39 @@ public final class SessionController {
             await stopStarted()
             try? FileManager.default.removeItem(at: folder.url)
             reset()
-            state = .failed(error.localizedDescription)
+            starting = false
+            if pendingCancel {
+                pendingCancel = false
+                state = .idle
+            } else {
+                state = .failed(error.localizedDescription)
+            }
+            return
+        }
+
+        starting = false
+        if pendingCancel {
+            pendingCancel = false
+            accepting = false
+            await stopStarted()
+            try? FileManager.default.removeItem(at: folder.url)
+            reset()
+            state = .idle
             return
         }
 
         state = .recording(mode: mode, startedAt: date)
-        await keyframe(.periodic)
+        await keyframe(.periodic, gen: gen)
+        guard gen == generation, isRecording else { return }
         persist()
 
         let interval = tickInterval
         tickTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: interval)
-                guard let self, self.isRecording else { return }
-                await self.keyframe(.periodic)
+                guard !Task.isCancelled, let self, self.generation == gen, self.isRecording else { return }
+                await self.keyframe(.periodic, gen: gen)
+                guard self.generation == gen, self.isRecording else { return }
                 self.persist()
             }
         }
@@ -148,9 +180,10 @@ public final class SessionController {
         case .momentMarked: reason = .mark
         default: return
         }
+        let gen = generation
         Task { [weak self] in
             if delay > .zero { try? await Task.sleep(for: delay) }
-            await self?.keyframe(reason)
+            await self?.keyframe(reason, gen: gen)
         }
     }
 
@@ -162,6 +195,7 @@ public final class SessionController {
     public func stop() async {
         guard isRecording, var folder, var metadata else { return }
         state = .finalizing
+        generation += 1
         tickTask?.cancel()
         tickTask = nil
         await stopStarted()   // services may still emit final events here
@@ -189,8 +223,14 @@ public final class SessionController {
     }
 
     public func cancel() async {
+        if starting {
+            pendingCancel = true
+            accepting = false
+            return
+        }
         guard isRecording else { return }
         state = .finalizing
+        generation += 1
         tickTask?.cancel()
         tickTask = nil
         accepting = false
@@ -202,8 +242,10 @@ public final class SessionController {
 
     // MARK: - Private
 
-    private func keyframe(_ reason: KeyframeReason) async {
-        guard isRecording, let event = await capture.captureKeyframe(reason: reason), isRecording else { return }
+    private func keyframe(_ reason: KeyframeReason, gen: Int) async {
+        guard gen == generation, isRecording,
+              let event = await capture.captureKeyframe(reason: reason),
+              gen == generation, isRecording else { return }
         events.append(event)
     }
 
