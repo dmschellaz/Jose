@@ -5,6 +5,9 @@ struct MenuContent: View {
     var body: some View {
         Button("Permissions…") { model.showOnboarding() }
         SettingsLink { Text("Settings…") }.keyboardShortcut(",")
+        #if DEBUG
+        DebugMenu(model: model)
+        #endif
         Divider()
         Button("Quit Redline") { NSApp.terminate(nil) }.keyboardShortcut("q")
     }
