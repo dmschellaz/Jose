@@ -115,11 +115,16 @@ final class AppModel {
 
     private func stopSession() async {
         await controller.stop()
-        pill.hide()
         partialTranscript = ""
-        if case let .done(result) = controller.state, let folder = controller.lastFolder {
-            handOff(result, folder: folder)
+        guard case let .done(result) = controller.state, let folder = controller.lastFolder else {
+            pill.hide()
+            return
         }
+        handOff(result, folder: folder)
+        // Keep the pill up briefly as the "Feedback ready" confirmation; banners are easy to miss.
+        NSSound(named: "Glass")?.play()
+        try? await Task.sleep(for: .seconds(5))
+        if case .done = controller.state { pill.hide() }
     }
 
     private func handOff(_ result: ReportResult, folder: SessionFolder) {

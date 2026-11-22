@@ -1,3 +1,4 @@
+import AppKit
 import RedlineCore
 import SwiftUI
 
@@ -42,7 +43,11 @@ struct OverlayView: View {
         .ignoresSafeArea()
         .gesture(
             DragGesture(minimumDistance: 0, coordinateSpace: .local)
-                .onChanged { value in if model.penActive { model.liveStroke.append(value.location) } }
+                .onChanged { value in
+                    guard model.penActive else { return }
+                    model.liveStroke.append(value.location)
+                    NSCursor.crosshair.set()   // keep the pen cursor while drawing
+                }
                 .onEnded { _ in
                     if model.liveStroke.count > 1 { onStroke(model.liveStroke) }
                     model.liveStroke = []

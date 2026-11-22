@@ -6,6 +6,8 @@ import SwiftUI
 final class OverlayController: SessionService {
     private var panels: [(panel: NSPanel, model: OverlayModel)] = []
     private var context: SessionContext?
+    /// The app that was in front before the pen took over; focus goes back to it on pen-up.
+    private var appBeforePen: NSRunningApplication?
 
     func start(context: SessionContext) async throws {
         await stop()
@@ -30,7 +32,27 @@ final class OverlayController: SessionService {
             p.panel.ignoresMouseEvents = !on
             if !on { p.model.liveStroke = [] }
         }
-        (active ? NSCursor.crosshair : NSCursor.arrow).set()
+        updateCursorOwnership(penActive: active)
+    }
+
+    /// macOS only lets the active app control the cursor; a background app's NSCursor.set() is
+    /// overridden by the frontmost app on the next mouse move. So while the pen is held Redline
+    /// becomes the active app (its overlay covers the screen), then hands focus back on pen-up.
+    private func updateCursorOwnership(penActive: Bool) {
+        if penActive {
+            if appBeforePen == nil, let front = NSWorkspace.shared.frontmostApplication,
+               front.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+                appBeforePen = front
+            }
+            NSApp.activate()
+            NSCursor.crosshair.set()
+        } else {
+            NSCursor.arrow.set()
+            if let previous = appBeforePen {
+                appBeforePen = nil
+                previous.activate()
+            }
+        }
     }
 
     func display(_ annotation: Annotation, lifetime: Double) {

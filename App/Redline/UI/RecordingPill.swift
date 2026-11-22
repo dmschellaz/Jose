@@ -59,6 +59,17 @@ private struct PillView: View {
                 ProgressView().controlSize(.small)
                 Text("Writing report…").font(.caption)
                 Spacer()
+            case let .done(result):
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Text(result.usedAI
+                     ? "Feedback copied (\(result.itemCount) item\(result.itemCount == 1 ? "" : "s")). Paste into Claude Code."
+                     : "Saved without AI write-up. Prompt copied.")
+                    .font(.caption).lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let folder = model.controller.lastFolder {
+                    Button("Open Folder") { NSWorkspace.shared.open(folder.url) }
+                        .controlSize(.small)
+                }
             default:
                 EmptyView()
             }
