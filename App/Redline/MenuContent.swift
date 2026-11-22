@@ -23,9 +23,9 @@ struct MenuContent: View {
                 Button(url.lastPathComponent) { NSWorkspace.shared.open(url) }
             }
         }
-        Button("Copy Last Write-up + Screenshots") { if let f = model.lastSessionFolder { model.copyWriteup(folder: f) } }
+        Button("Copy Last Write-up (Paste Twice)") { if let f = model.lastSessionFolder { model.copyWriteup(folder: f) } }
             .disabled(model.lastSessionFolder == nil)
-        Button("Copy Last Screenshots Only") { if let f = model.lastSessionFolder { model.copyWriteup(folder: f, includeText: false) } }
+        Button("Copy Last Screenshots Only") { if let f = model.lastSessionFolder { model.copyScreenshots(folder: f) } }
             .disabled(model.lastSessionFolder == nil)
         Button("Regenerate Last Report") { Task { await model.regenerateLast() } }
             .disabled(model.lastSessionFolder == nil || model.isRecording || model.isStarting || model.isFinalizing)

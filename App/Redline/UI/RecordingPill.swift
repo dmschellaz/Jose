@@ -162,7 +162,7 @@ private struct IslandContent: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(result.usedAI ? "Feedback ready · \(result.itemCount) item\(result.itemCount == 1 ? "" : "s")" : result.error == nil ? "No feedback captured" : "Saved without AI write-up")
                         .font(.system(size: 13, weight: .semibold))
-                    Text(remote ? "Copied with screenshots. Paste into Claude."
+                    Text(remote ? pasteHint
                          : result.usedAI ? "Prompt copied. Paste into Claude Code." : "Prompt copied. Screenshots and transcript are saved.")
                         .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
                     if result.usedAI, let usedModel = result.model {
@@ -177,7 +177,7 @@ private struct IslandContent: View {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(result.prompt, forType: .string)
                         }
-                        copiedAgain = true
+                        if !remote { copiedAgain = true }   // in paste mode the hint shows progress
                     }
                     .buttonStyle(IslandButtonStyle(prominent: true))
                     Button("Open Folder") { NSWorkspace.shared.open(folder.url) }
@@ -194,6 +194,15 @@ private struct IslandContent: View {
         }
         .foregroundStyle(.white)
         .frame(maxHeight: .infinity)
+    }
+
+    private var pasteHint: String {
+        switch model.paste.step {
+        case .text: "⌘V in Claude to paste the write-up (1 of 2)"
+        case .screenshots: "⌘V again to add the screenshots (2 of 2)"
+        case .done: "All pasted. Send it in Claude."
+        case nil: "Write-up copied. Paste into Claude."
+        }
     }
 
     private func titled(_ title: String, _ subtitle: String) -> some View {

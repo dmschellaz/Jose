@@ -68,9 +68,12 @@ Read ~/Feedback/localhost-3000-2026-11-22-1430/feedback.md and the screenshots i
 
 Claude Code reads the Markdown and opens the screenshots itself.
 
-**Claude Code on another computer?** It can't open files on this Mac, so set **Settings → Hand-off → Claude Code runs on: Another computer**. Then stopping a session copies the write-up **and** its screenshots together: paste once (⌘V) into the Claude chat and they attach as files (`feedback-for-claude.md` plus the PNGs), then send. The write-up refers to the images as "attached image 1", "attached image 2", and so on. (Chat apps drop pasted text when files come along, which is why the write-up is a file.)
+**Claude Code on another computer?** It can't open files on this Mac, so set **Settings → Hand-off → Claude Code runs on: Another computer**. Chat apps drop pasted text when images come along, so the hand-off is **paste twice**:
 
-**Copy Again** on the island, or menu bar icon → **Copy Last Write-up + Screenshots**, copies it again. If a chat only takes the text, use **Copy Last Screenshots Only** and paste a second time.
+1. In the Claude chat, press ⌘V: the write-up text goes in. Redline notices and swaps the screenshots onto the clipboard (you hear a tink).
+2. Press ⌘V again: the screenshots attach, in order. Send.
+
+The island shows which paste is next and closes itself after the second. The write-up refers to the images as "attached image 1", "attached image 2", and so on. **Copy Again** on the island, or menu bar icon → **Copy Last Write-up (Paste Twice)**, starts over; **Copy Last Screenshots Only** copies just the images. If you copy something else in between, Redline stops and leaves your clipboard alone.
 
 ## Other menu items
 

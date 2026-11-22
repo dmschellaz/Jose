@@ -18,6 +18,20 @@ enum BrowserURLReader {
 
     static func supports(_ bundleID: String) -> Bool { scripts[bundleID] != nil }
 
+    /// The supported browser to read: the frontmost app if it is one, otherwise the browser whose
+    /// window is highest on screen (e.g. Chrome on one display while the Claude app has focus).
+    @MainActor static func browserToRead() -> String? {
+        if let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier, supports(front) { return front }
+        guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+                as? [[String: Any]] else { return nil }
+        for window in windows where (window[kCGWindowLayer as String] as? Int) == 0 {   // front to back
+            guard let pid = window[kCGWindowOwnerPID as String] as? pid_t,
+                  let id = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier else { continue }
+            if supports(id) { return id }
+        }
+        return nil
+    }
+
     /// Returns nil for unsupported apps, no window, or denied Automation permission.
     @MainActor static func read(bundleID: String) -> (url: String, title: String?)? {
         guard let source = scripts[bundleID], let script = NSAppleScript(source: source) else { return nil }

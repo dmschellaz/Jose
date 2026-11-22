@@ -17,6 +17,7 @@ final class AppModel {
     @ObservationIgnored private let speech = SpeechService()
     @ObservationIgnored private let pill = RecordingPillController()
     @ObservationIgnored private let onboarding = OnboardingWindowController()
+    let paste = PasteSequencer()
 
     var isRecording: Bool { controller.isRecording }
     var isFinalizing: Bool { controller.state == .finalizing }
@@ -31,6 +32,7 @@ final class AppModel {
             reportBuilder: { Self.makeReportBuilder(settings) })
         context.onPen = { [overlay] in overlay.setPen($0) }
         speech.onPartial = { [weak self] in self?.partialTranscript = $0 }
+        paste.onFinished = { [pill] in pill.hide(after: .seconds(2)) }
     }
 
     func launch() {
@@ -137,40 +139,39 @@ final class AppModel {
         if !settings.pasteForOtherComputer { pill.hide(after: .seconds(10)) }
     }
 
-    /// Copies the whole write-up and its screenshots in one go, for pasting into a Claude chat on
-    /// another computer: the first clipboard item is the text, then one item per screenshot (file URL
-    /// plus PNG data), in order.
+    /// Starts the "paste twice" hand-off for a Claude chat on another computer: the write-up text is
+    /// on the clipboard now, and the screenshots replace it after the first ⌘V.
     @discardableResult
-    func copyWriteup(folder: URL, includeText: Bool = true) -> Bool {
+    func copyWriteup(folder: URL) -> Bool {
         guard let markdown = try? String(contentsOf: SessionFolder(url: folder).feedbackURL, encoding: .utf8) else { return false }
-        var items: [NSPasteboardItem] = []
-        if includeText {
-            // Chat apps attach the clipboard's files and drop its plain text when both are present,
-            // so the write-up travels as a file too. The string stays for apps that only take text.
-            let inline = HandoffPrompt.inline(markdown: markdown)
-            let text = NSPasteboardItem()
-            let file = folder.appending(path: "feedback-for-claude.md")
-            if (try? inline.write(to: file, atomically: true, encoding: .utf8)) != nil {
-                text.setString(file.absoluteString, forType: .fileURL)
-            }
-            text.setString(inline, forType: .string)
-            items.append(text)
-        }
-        for name in HandoffPrompt.imageFiles(in: markdown) {
-            let url = folder.appending(path: name)
-            guard let data = try? Data(contentsOf: url) else { continue }
-            let image = NSPasteboardItem()
-            image.setString(url.absoluteString, forType: .fileURL)
-            image.setData(data, forType: .png)
-            items.append(image)
-        }
-        guard !items.isEmpty else { return false }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.writeObjects(items)
+        paste.start(text: HandoffPrompt.inline(markdown: markdown), images: Self.imageItems(folder: folder, markdown: markdown))
         return true
     }
 
+    /// Puts only the screenshots on the clipboard.
+    func copyScreenshots(folder: URL) {
+        paste.cancel()
+        let markdown = (try? String(contentsOf: SessionFolder(url: folder).feedbackURL, encoding: .utf8)) ?? ""
+        let items = Self.imageItems(folder: folder, markdown: markdown)
+        guard !items.isEmpty else { NSSound.beep(); return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects(items)
+    }
+
+    /// One clipboard item per screenshot the write-up links, in order: file URL plus PNG data.
+    private static func imageItems(folder: URL, markdown: String) -> [NSPasteboardItem] {
+        HandoffPrompt.imageFiles(in: markdown).compactMap { name in
+            let url = folder.appending(path: name)
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            let item = NSPasteboardItem()
+            item.setString(url.absoluteString, forType: .fileURL)
+            item.setData(data, forType: .png)
+            return item
+        }
+    }
+
     private func handOff(_ result: ReportResult, folder: SessionFolder) {
+        paste.cancel()
         if !(settings.pasteForOtherComputer && copyWriteup(folder: folder.url)) {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(result.prompt, forType: .string)

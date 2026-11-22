@@ -109,8 +109,7 @@ final class ContextService: SessionService {
 
     private func pollURL() {
         guard let context,
-              let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
-              BrowserURLReader.supports(bundleID),
+              let bundleID = BrowserURLReader.browserToRead(),
               let page = BrowserURLReader.read(bundleID: bundleID),
               page.url != lastURL else { return }
         lastURL = page.url
