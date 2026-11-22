@@ -15,6 +15,7 @@ final class RecordingPillController {
                         backing: .buffered, defer: false)
         p.isOpaque = false
         p.backgroundColor = .clear
+        p.hasShadow = false
         p.level = .statusBar
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         p.contentView = NSHostingView(rootView: PillView(model: model))
@@ -47,7 +48,10 @@ private struct PillView: View {
                     .lineLimit(1).truncationMode(.head)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Button(confirmCancel ? "Discard?" : "Cancel") {
-                    if confirmCancel { Task { await model.cancel() } } else { confirmCancel = true }
+                    if confirmCancel { Task { await model.cancel() } } else {
+                        confirmCancel = true
+                        Task { try? await Task.sleep(for: .seconds(3)); confirmCancel = false }
+                    }
                 }
                 .controlSize(.small)
                 Button("Stop") { Task { await model.toggleSession() } }

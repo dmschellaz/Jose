@@ -39,6 +39,7 @@ struct OverlayView: View {
         // A faint tint while drawing: it shows pen mode and makes the window catch clicks (fully clear pixels pass through).
         .background(model.penActive ? Color.black.opacity(0.04) : Color.clear)
         .contentShape(Rectangle())
+        .ignoresSafeArea()
         .gesture(
             DragGesture(minimumDistance: 0, coordinateSpace: .local)
                 .onChanged { value in if model.penActive { model.liveStroke.append(value.location) } }

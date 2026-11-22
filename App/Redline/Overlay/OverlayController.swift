@@ -8,6 +8,7 @@ final class OverlayController: SessionService {
     private var context: SessionContext?
 
     func start(context: SessionContext) async throws {
+        await stop()
         self.context = context
         showPanels()
     }
@@ -23,6 +24,8 @@ final class OverlayController: SessionService {
         let cursor = CoordinateMapper.quartz(fromCocoa: NSEvent.mouseLocation, primaryHeight: primaryScreenHeight())
         for p in panels {
             let on = active && p.model.display.frame.contains(cursor)
+            // Pen released mid-drag: commit the in-progress stroke instead of discarding it.
+            if !on, p.model.liveStroke.count > 1 { finishStroke(p.model.liveStroke, on: p.model.display) }
             p.model.penActive = on
             p.panel.ignoresMouseEvents = !on
             if !on { p.model.liveStroke = [] }
@@ -50,9 +53,11 @@ final class OverlayController: SessionService {
             panel.level = .screenSaver
             panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
             panel.ignoresMouseEvents = true
-            panel.contentView = NSHostingView(rootView: OverlayView(model: model) { [weak self] points in
+            let hosting = NSHostingView(rootView: OverlayView(model: model) { [weak self] points in
                 self?.finishStroke(points, on: geo)
             })
+            hosting.safeAreaRegions = []   // notched displays: keep SwiftUI (0,0) at the panel's top-left
+            panel.contentView = hosting
             panel.setFrame(screen.frame, display: true)
             panel.orderFrontRegardless()
             panels.append((panel, model))
@@ -60,10 +65,11 @@ final class OverlayController: SessionService {
     }
 
     private func finishStroke(_ local: [CGPoint], on geo: DisplayGeometry) {
+        guard let context else { return }
         let global = local.map { CoordinateMapper.global(fromLocal: $0, on: geo) }
         let annotation = Annotation(shape: .stroke(global), caption: nil, author: .user,
-                                    createdAt: context?.clock.now() ?? 0, displayID: geo.id)
+                                    createdAt: context.clock.now(), displayID: geo.id)
         display(annotation, lifetime: 4)
-        context?.emit(.userMark(annotation))
+        context.emit(.userMark(annotation))
     }
 }
