@@ -30,7 +30,9 @@ The first time Redline reads a browser tab, macOS also asks to let Redline contr
 
 ## 3. Add your API key
 
-Menu bar icon → **Settings…** → paste your key → **Save Key**. The key is stored in your Keychain only. Leave the report model on `claude-sonnet-5-5` (or pick `claude-opus-5-5`).
+Create the key inside a workspace: in console.anthropic.com go to **Settings → Workspaces**, pick (or create) one such as "Redline", and create the key there. A key that isn't scoped to a workspace is rejected with "must include the anthropic-workspace-id header".
+
+Menu bar icon → **Settings…** → paste your key → **Save Key** (pasting a new key replaces the old one). The key is stored in your Keychain only. Leave the report model on `claude-sonnet-5-5` (or pick `claude-opus-5-5`).
 
 ## 4. Record a feedback session
 
@@ -75,5 +77,5 @@ Claude Code reads the Markdown and opens the screenshots itself.
 
 - **No pencil icon:** check the app is running with `pgrep -x Redline`. Your menu bar may be full; hide other icons or use a menu bar manager.
 - **"Couldn't start recording":** a permission is missing. Menu → **Permissions…**
-- **Report says "Saved without an AI write-up":** the notification gives the reason (no key, key rejected, rate limit, network). For details, run `log stream --predicate 'subsystem == "com.dmschellaz.redline"'` while you choose Regenerate.
+- **Report says "Saved without an AI write-up":** the notification gives the reason (no key, key rejected, rate limit, network). If the log mentions `anthropic-workspace-id`, your key isn't scoped to a workspace: make a new one inside a workspace (step 3). For details, run `log stream --predicate 'subsystem == "com.dmschellaz.redline"'` while you choose Regenerate.
 - **Permissions keep being asked for again:** you're running an unsigned build. Make sure `.team` exists in the repo folder (it holds your Team ID) and `make run` again.
