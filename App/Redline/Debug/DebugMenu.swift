@@ -25,6 +25,19 @@ struct DebugMenu: View {
                     await DebugHarness.run([ctx], seconds: 15, title: "Context")
                 }
             }
+            Button("Overlay + pen 20 s") {
+                Task {
+                    let overlay = OverlayController()
+                    let ctx = ContextService()
+                    ctx.onPen = { overlay.setPen($0) }
+                    await DebugHarness.run([overlay, ctx], seconds: 20, title: "Overlay") { _ in
+                        let d = NSScreen.main?.displayID ?? 0
+                        let b = CGDisplayBounds(d)
+                        overlay.display(Annotation(shape: .circle(center: CGPoint(x: b.midX, y: b.midY), radius: 80),
+                                                   caption: nil, author: .ai, createdAt: 0, displayID: d), lifetime: 6)
+                    }
+                }
+            }
         }
     }
 }
