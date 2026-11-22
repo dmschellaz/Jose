@@ -64,7 +64,7 @@ public struct ReportBuilder: ReportBuilding {
                 usedAI = true
                 tokens = TokenUsage(input: response.usage?.input_tokens ?? 0, output: response.usage?.output_tokens ?? 0)
             } catch {
-                errorText = String(describing: error)
+                errorText = ReportErrorText.describe(error)
             }
         }
 

@@ -8,6 +8,8 @@ struct MenuContent: View {
             Button("Stop & Write Report") { Task { await model.toggleSession() } }
             Button("Mark Moment") { model.markMoment() }
             Button("Cancel Session") { Task { await model.cancel() } }
+        } else if model.isStarting {
+            Button("Starting…") {}.disabled(true)
         } else {
             Button(model.isFinalizing ? "Writing report…" : "Start Feedback Session") { Task { await model.toggleSession() } }
                 .disabled(model.isFinalizing)
@@ -22,7 +24,7 @@ struct MenuContent: View {
             }
         }
         Button("Regenerate Last Report") { Task { await model.regenerateLast() } }
-            .disabled(model.lastSessionFolder == nil || model.isRecording)
+            .disabled(model.lastSessionFolder == nil || model.isRecording || model.isStarting || model.isFinalizing)
         Divider()
         Button("Permissions…") { model.showOnboarding() }
         SettingsLink { Text("Settings…") }.keyboardShortcut(",")

@@ -7,6 +7,8 @@ import RedlineCore
 final class AppModel {
     let settings = AppSettings()
     private(set) var partialTranscript = ""
+    private(set) var isStarting = false
+    @ObservationIgnored private var isRegenerating = false
     @ObservationIgnored private(set) var controller: SessionController!
 
     @ObservationIgnored private let capture = CaptureService()
@@ -39,6 +41,7 @@ final class AppModel {
     }
 
     func toggleSession() async {
+        guard !isStarting else { return }
         switch controller.state {
         case .recording: await stopSession()
         case .finalizing: return
@@ -47,8 +50,9 @@ final class AppModel {
     }
 
     func cancel() async {
+        let wasActive = controller.isRecording || isStarting
         await controller.cancel()
-        pill.hide()
+        if wasActive { pill.hide() }
         partialTranscript = ""
     }
 
@@ -61,7 +65,9 @@ final class AppModel {
     func showOnboarding() { onboarding.show() }
 
     func regenerateLast() async {
-        guard let url = lastSessionFolder else { return }
+        guard let url = lastSessionFolder, !isRegenerating, !isFinalizing, !isRecording else { return }
+        isRegenerating = true
+        defer { isRegenerating = false }
         let folder = SessionFolder(url: url)
         do {
             let doc = try SessionStore.load(from: folder)
@@ -93,13 +99,16 @@ final class AppModel {
             onboarding.show()
             return
         }
-        pill.show(model: self)
+        isStarting = true
+        defer { isStarting = false }
         await controller.start(mode: .manual)
-        if case let .failed(message) = controller.state {
-            pill.hide()
-            Notifier.post(title: "Couldn't start recording", body: message, folder: nil)
+        guard controller.isRecording else {
+            if case let .failed(message) = controller.state {
+                Notifier.post(title: "Couldn't start recording", body: message, folder: nil)
+            }
             return
         }
+        pill.show(model: self)
         NSSound(named: "Pop")?.play()
     }
 
