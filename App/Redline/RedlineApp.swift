@@ -10,6 +10,9 @@ struct RedlineApp: App {
         } label: {
             Image(systemName: delegate.model.isRecording ? "record.circle.fill" : "pencil.and.scribble")
         }
+        Settings {
+            SettingsView(settings: delegate.model.settings)
+        }
     }
 }
 
