@@ -122,11 +122,10 @@ final class AppModel {
             return
         }
         handOff(result, folder: folder)
-        // Keep the pill up as the "Feedback ready" confirmation; banners are easy to miss. In paste
-        // mode it also holds the Copy Screenshots button, so give time for the first paste.
+        // The island stays up as the "Feedback ready" confirmation; banners are easy to miss. In paste
+        // mode it holds the Copy Screenshots button, so it stays until closed.
         NSSound(named: "Glass")?.play()
-        try? await Task.sleep(for: .seconds(settings.pasteForOtherComputer ? 60 : 5))
-        if case .done = controller.state { pill.hide() }
+        if !settings.pasteForOtherComputer { pill.hide(after: .seconds(10)) }
     }
 
     /// Copies the whole write-up for pasting into a Claude session on another computer.
