@@ -48,6 +48,8 @@ public final class SessionController {
 
     public private(set) var state: State = .idle
     public private(set) var lastFolder: SessionFolder?
+    /// Folder of the session in progress (follows the rename in `stop`); nil when idle.
+    public private(set) var currentFolder: SessionFolder?
 
     @ObservationIgnored private let capture: any FrameCapturing
     @ObservationIgnored private let services: [any SessionService]
@@ -112,6 +114,7 @@ public final class SessionController {
         }
         let clock = SessionClock(startedAt: date, now: now)
         self.folder = folder
+        self.currentFolder = folder
         self.clock = clock
         events = []
         metadata = SessionMetadata(startedAt: date, endedAt: nil, mode: mode, displays: [], tokens: TokenUsage())
@@ -149,6 +152,7 @@ public final class SessionController {
             return
         }
 
+        metadata?.displays = capture.displays
         state = .recording(mode: mode, startedAt: date)
         await keyframe(.periodic, gen: gen)
         guard gen == generation, isRecording else { return }
@@ -161,6 +165,7 @@ public final class SessionController {
                 guard !Task.isCancelled, let self, self.generation == gen, self.isRecording else { return }
                 await self.keyframe(.periodic, gen: gen)
                 guard self.generation == gen, self.isRecording else { return }
+                self.metadata?.displays = self.capture.displays
                 self.persist()
             }
         }
@@ -211,6 +216,7 @@ public final class SessionController {
             folder = renamed
         }
         self.folder = folder
+        self.currentFolder = folder
         self.metadata = metadata
         persist()
 
@@ -266,6 +272,7 @@ public final class SessionController {
 
     private func reset() {
         folder = nil
+        currentFolder = nil
         clock = nil
         metadata = nil
         events = []

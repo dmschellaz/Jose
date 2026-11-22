@@ -108,6 +108,7 @@ final class AppModel {
             }
             return
         }
+        if let folder = controller.currentFolder { settings.lastSessionPath = folder.url.path }
         pill.show(model: self)
         NSSound(named: "Pop")?.play()
     }

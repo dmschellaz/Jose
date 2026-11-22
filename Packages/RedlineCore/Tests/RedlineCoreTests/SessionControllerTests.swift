@@ -113,6 +113,29 @@ final class FakeBuilder: ReportBuilding, @unchecked Sendable {
         #expect(!FileManager.default.fileExists(atPath: folder.url.path))
     }
 
+    @Test func persistedMetadataHasDisplaysAndCurrentFolderIsExposed() async throws {
+        let service = FakeService()
+        let (c, _) = makeController(service: service)
+        #expect(c.currentFolder == nil)
+        await c.start(mode: .manual)
+        let folder = service.context!.folder
+        #expect(c.currentFolder?.url == folder.url)
+        let saved = try SessionStore.load(from: folder)
+        #expect(saved.metadata.displays.count == 1)
+        await c.cancel()
+        #expect(c.currentFolder == nil)
+    }
+
+    @Test func currentFolderFollowsRenameOnStop() async throws {
+        let (c, _) = makeController()
+        await c.start(mode: .manual)
+        var seen: URL?
+        await c.stop()
+        seen = c.lastFolder?.url
+        #expect(seen != nil)
+        #expect(c.currentFolder == nil)
+    }
+
     @Test func periodicTickCapturesAndSaves() async {
         let capture = FakeCapture()
         let (c, _) = makeController(capture: capture, tick: .milliseconds(20))

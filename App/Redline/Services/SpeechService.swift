@@ -95,10 +95,12 @@ final class SpeechService: SessionService {
                     if result.isFinal {
                         self?.onPartial?("")
                         guard !text.isEmpty else { continue }
+                        let start = result.range.start.seconds, end = result.range.end.seconds
+                        guard start.isFinite, end.isFinite else { continue }   // NaN would break JSON encoding
                         let offset = offsetBox.value
                         emit(.sentence(id: UUID(), text: text,
-                                       start: offset + result.range.start.seconds,
-                                       end: offset + result.range.end.seconds))
+                                       start: offset + start,
+                                       end: offset + end))
                     } else {
                         self?.onPartial?(text)
                     }

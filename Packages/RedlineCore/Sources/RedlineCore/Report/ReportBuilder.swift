@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import os
 
 public struct ReportResult: Equatable, Sendable {
     public var itemCount: Int
@@ -20,6 +21,8 @@ public struct ReportResult: Equatable, Sendable {
 public protocol ReportBuilding: Sendable {
     func build(document: SessionDocument, folder: SessionFolder) async -> ReportResult
 }
+
+private let reportLog = Logger(subsystem: "com.dmschellaz.redline", category: "report")
 
 public struct ReportBuilder: ReportBuilding {
     public static let maxImages = 20
@@ -50,6 +53,10 @@ public struct ReportBuilder: ReportBuilding {
         var errorText: String? = llm == nil ? "No API key set" : nil
         var tokens = TokenUsage()
 
+        if llm != nil, moments.isEmpty {
+            errorText = "Nothing was said or marked in this session."
+        }
+
         if let llm, !moments.isEmpty {
             let ids = composed.keys.sorted().prefix(Self.maxImages)
             var images: [Int: Data] = [:]
@@ -64,6 +71,7 @@ public struct ReportBuilder: ReportBuilding {
                 usedAI = true
                 tokens = TokenUsage(input: response.usage?.input_tokens ?? 0, output: response.usage?.output_tokens ?? 0)
             } catch {
+                Self.log(error)
                 errorText = ReportErrorText.describe(error)
             }
         }
@@ -80,7 +88,13 @@ public struct ReportBuilder: ReportBuilding {
             }
         }
 
-        let duration = (document.metadata.endedAt ?? document.metadata.startedAt).timeIntervalSince(document.metadata.startedAt)
+        // A crashed session has no endedAt; fall back to the latest event time.
+        let duration: Double
+        if let endedAt = document.metadata.endedAt {
+            duration = endedAt.timeIntervalSince(document.metadata.startedAt)
+        } else {
+            duration = document.events.map(\.time).filter(\.isFinite).max() ?? 0
+        }
         let context = ReportContext(appName: SessionFolder.slug(fromURL: startURL), startURL: startURL,
                                     startedAt: document.metadata.startedAt, duration: duration, mode: document.metadata.mode,
                                     transcript: transcript, imageFiles: imageFiles, timeZone: timeZone)
@@ -93,6 +107,21 @@ public struct ReportBuilder: ReportBuilding {
 
         return ReportResult(itemCount: items.count, usedAI: usedAI, prompt: HandoffPrompt.make(folder: folder),
                             error: errorText, tokens: tokens)
+    }
+
+    private static func log(_ error: Error) {
+        if let e = error as? ClaudeError {
+            switch e {
+            case let .http(status, body):
+                reportLog.error("Claude API HTTP \(status, privacy: .public): \(body, privacy: .public)")
+            case let .invalidJSON(text):
+                reportLog.error("Claude returned invalid JSON: \(String(text.prefix(500)), privacy: .public)")
+            default:
+                reportLog.error("Claude error: \(String(describing: e), privacy: .public)")
+            }
+        } else {
+            reportLog.error("Report error: \(String(describing: error), privacy: .public)")
+        }
     }
 
     private func composeImages(moments: [Moment], document: SessionDocument, folder: SessionFolder) -> [Int: CGImage] {

@@ -54,7 +54,7 @@ public enum MarkdownRenderer {
         df.locale = Locale(identifier: "en_US_POSIX")
         df.timeZone = context.timeZone
         df.dateFormat = "yyyy-MM-dd HH:mm"
-        let secs = Int(context.duration.rounded())
+        let secs = context.duration.isFinite ? max(0, Int(context.duration.rounded())) : 0
 
         var out = "# Feedback: \(context.appName) — \(df.string(from: context.startedAt))\n"
         out += "Reviewed at: \(context.startURL ?? "unknown page") · \(secs / 60)m \(secs % 60)s · mode: \(context.mode.title)\n"
@@ -84,7 +84,7 @@ public enum MarkdownRenderer {
     }
 
     public static func timestamp(_ t: Double) -> String {
-        let s = max(0, Int(t))
+        let s = t.isFinite ? max(0, Int(t)) : 0
         return String(format: "%02d:%02d", s / 60, s % 60)
     }
 }

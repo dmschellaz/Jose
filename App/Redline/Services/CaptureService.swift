@@ -45,7 +45,8 @@ final class CaptureService: FrameCapturing {
             let t = context.clock.now()
             let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
             let file = "kf-\(Int(t * 1000))-\(reason.rawValue).png"
-            try ImageFiles.writePNG(image, to: context.folder.rawURL.appending(path: file))
+            let url = context.folder.rawURL.appending(path: file)
+            try await Task.detached(priority: .utility) { try ImageFiles.writePNG(image, to: url) }.value
             return .keyframe(KeyframeRef(id: UUID(), file: file, t: t, displayID: geo.id), reason: reason)
         } catch {
             NSLog("Redline: capture failed: \(error)")

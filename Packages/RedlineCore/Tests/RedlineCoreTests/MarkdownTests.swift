@@ -78,3 +78,10 @@ private let item = FeedbackItem(title: "Billing card padding is too tight", mome
     #expect(HandoffPrompt.make(folder: folder) ==
             "Read /tmp/fb/myapp-2025-11-22-1430/feedback.md and the screenshots it links, then make each revision in this project. Ask me if an item is ambiguous.")
 }
+
+@Test func timestampTreatsNonFiniteAsZero() {
+    #expect(MarkdownRenderer.timestamp(.nan) == "00:00")
+    #expect(MarkdownRenderer.timestamp(.infinity) == "00:00")
+    #expect(MarkdownRenderer.timestamp(-.infinity) == "00:00")
+    #expect(MarkdownRenderer.timestamp(75) == "01:15")
+}

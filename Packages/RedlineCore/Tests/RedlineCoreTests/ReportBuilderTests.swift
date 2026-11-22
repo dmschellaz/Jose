@@ -69,3 +69,20 @@ private func makeSession() throws -> (SessionDocument, SessionFolder) {
     #expect(result.error?.contains("500") == true)
     #expect(result.itemCount == 1)
 }
+
+@Test func crashedSessionUsesLatestEventTimeForDuration() async throws {
+    var (doc, folder) = try makeSession()
+    doc.metadata.endedAt = nil
+    doc.events.append(.urlChanged(url: "http://localhost:3000/late", title: nil, t: 95))
+    _ = await ReportBuilder(llm: nil, model: "m", timeZone: .gmt).build(document: doc, folder: folder)
+    let md = try String(contentsOf: folder.feedbackURL, encoding: .utf8)
+    #expect(md.contains("1m 35s"))
+}
+
+@Test func noMomentsWithLLMReportsReason() async throws {
+    var (doc, folder) = try makeSession()
+    doc.events = []
+    let result = await ReportBuilder(llm: FakeLLM(text: "{}"), model: "m", timeZone: .gmt).build(document: doc, folder: folder)
+    #expect(!result.usedAI)
+    #expect(result.error == "Nothing was said or marked in this session.")
+}
