@@ -2,10 +2,19 @@ import AppKit
 
 enum BrowserURLReader {
     private static let scripts: [String: String] = [
-        "com.google.Chrome": #"tell application id "com.google.Chrome" to get {URL, title} of active tab of front window"#,
-        "company.thebrowser.Browser": #"tell application id "company.thebrowser.Browser" to get {URL, title} of active tab of front window"#,
-        "com.apple.Safari": #"tell application id "com.apple.Safari" to get {URL, name} of front document"#,
+        "com.google.Chrome": chromium("com.google.Chrome"),
+        "company.thebrowser.Browser": chromium("company.thebrowser.Browser"),
+        "com.apple.Safari": bounded(#"tell application id "com.apple.Safari" to get {URL, name} of front document"#),
     ]
+
+    private static func chromium(_ id: String) -> String {
+        bounded(#"tell application id "\#(id)" to get {URL, title} of active tab of front window"#)
+    }
+
+    /// Bounds the Apple Event wait so a hung or launching browser can't stall the main thread.
+    private static func bounded(_ body: String) -> String {
+        "with timeout of 1 second\n\(body)\nend timeout"
+    }
 
     static func supports(_ bundleID: String) -> Bool { scripts[bundleID] != nil }
 

@@ -18,6 +18,7 @@ final class ContextService: SessionService {
     private var context: SessionContext?
 
     func start(context: SessionContext) async throws {
+        await stop()
         self.context = context
         lastURL = nil
         detector = PenGestureDetector()
@@ -53,7 +54,10 @@ final class ContextService: SessionService {
     func stop() async {
         urlTimer?.invalidate()
         urlTimer = nil
-        if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
+        if let tap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)
+        }
         if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
         tap = nil
         source = nil
@@ -67,6 +71,8 @@ final class ContextService: SessionService {
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
+            // A release may have been missed while the tap was disabled; resync from real state.
+            apply(detector.flagsChanged(Self.modifiers(CGEventSource.flagsState(.combinedSessionState)), at: t))
         case .leftMouseDown:
             guard !detector.isActive else { return }
             var displayID: CGDirectDisplayID = 0
