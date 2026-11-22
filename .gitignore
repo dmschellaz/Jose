@@ -7,3 +7,4 @@ build/
 .team
 App/Redline/Info.plist
 App/Redline/Redline.entitlements
+dist/

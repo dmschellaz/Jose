@@ -8,7 +8,7 @@ else
 SIGN_FLAGS := DEVELOPMENT_TEAM=$(TEAM) -allowProvisioningUpdates
 endif
 
-.PHONY: test project app run clean
+.PHONY: test project app run release clean
 
 test:
 	cd Packages/RedlineCore && swift test
@@ -28,5 +28,21 @@ run: app
 	@for i in $$(seq 1 50); do pgrep -x Redline >/dev/null || break; sleep 0.1; done
 	open $(APP)
 
+# A download for other Macs: universal (Apple silicon + Intel), ad-hoc signed, not notarized.
+VERSION := $(shell sed -n 's/.*CFBundleShortVersionString: "\(.*\)"/\1/p' project.yml)
+RELEASE_APP := build/release/Build/Products/Release/Redline.app
+
+release: project
+	xcodebuild -project Redline.xcodeproj -scheme Redline -configuration Release \
+	  -destination 'generic/platform=macOS' -derivedDataPath build/release \
+	  ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
+	  CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= CODE_SIGN_STYLE=Manual -quiet build
+	rm -rf dist && mkdir -p dist/dmg
+	cp -R $(RELEASE_APP) dist/dmg/
+	ln -s /Applications dist/dmg/Applications
+	hdiutil create -quiet -volname "Redline $(VERSION)" -srcfolder dist/dmg -ov -format UDZO dist/Redline-$(VERSION).dmg
+	rm -rf dist/dmg
+	@echo "Built dist/Redline-$(VERSION).dmg"
+
 clean:
-	rm -rf build Redline.xcodeproj Packages/RedlineCore/.build
+	rm -rf build dist Redline.xcodeproj Packages/RedlineCore/.build
