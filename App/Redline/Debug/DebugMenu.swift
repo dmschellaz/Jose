@@ -15,6 +15,9 @@ struct DebugMenu: View {
                     }
                 }
             }
+            Button("Transcribe 10 s") {
+                Task { await DebugHarness.run([SpeechService()], seconds: 10, title: "Speech") }
+            }
         }
     }
 }
