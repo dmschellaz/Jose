@@ -18,6 +18,13 @@ struct DebugMenu: View {
             Button("Transcribe 10 s") {
                 Task { await DebugHarness.run([SpeechService()], seconds: 10, title: "Speech") }
             }
+            Button("Context 15 s") {
+                Task {
+                    let ctx = ContextService()
+                    ctx.onPen = { NSLog("Redline: pen \($0 ? "down" : "up")") }
+                    await DebugHarness.run([ctx], seconds: 15, title: "Context")
+                }
+            }
         }
     }
 }
