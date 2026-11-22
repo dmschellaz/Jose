@@ -5,7 +5,7 @@ APP := build/Build/Products/Debug/Redline.app
 ifeq ($(strip $(TEAM)),)
 SIGN_FLAGS := CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= CODE_SIGN_STYLE=Manual
 else
-SIGN_FLAGS := DEVELOPMENT_TEAM=$(TEAM)
+SIGN_FLAGS := DEVELOPMENT_TEAM=$(TEAM) -allowProvisioningUpdates
 endif
 
 .PHONY: test project app run clean
