@@ -19,11 +19,13 @@ project:
 app: project
 	@if [ -z "$(strip $(TEAM))" ]; then echo "No .team file: building ad-hoc signed; macOS will re-ask for permissions after each rebuild"; fi
 	xcodebuild -project Redline.xcodeproj -scheme Redline -configuration Debug \
-	  -derivedDataPath build $(SIGN_FLAGS) -quiet build
+	  -destination 'platform=macOS,arch=arm64' -derivedDataPath build $(SIGN_FLAGS) -quiet build
 
 # Launch through LaunchServices so macOS attributes permissions to Redline, not Terminal.
 run: app
-	-pkill -x Redline
+	@pkill -x Redline || true
+	@# Wait for the old instance to fully exit, or LaunchServices fails with error -600.
+	@for i in $$(seq 1 50); do pgrep -x Redline >/dev/null || break; sleep 0.1; done
 	open $(APP)
 
 clean:
