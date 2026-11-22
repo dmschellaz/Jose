@@ -68,7 +68,7 @@ Read ~/Feedback/localhost-3000-2026-11-22-1430/feedback.md and the screenshots i
 
 Claude Code reads the Markdown and opens the screenshots itself.
 
-**Claude Code on another computer?** It can't open files on this Mac, so set **Settings → Hand-off → Claude Code runs on: Another computer**. Then stopping a session copies the whole write-up **and** its screenshots together: paste once (⌘V) into the Claude chat and send. The write-up refers to the images as "attached image 1", "attached image 2", and so on.
+**Claude Code on another computer?** It can't open files on this Mac, so set **Settings → Hand-off → Claude Code runs on: Another computer**. Then stopping a session copies the write-up **and** its screenshots together: paste once (⌘V) into the Claude chat and they attach as files (`feedback-for-claude.md` plus the PNGs), then send. The write-up refers to the images as "attached image 1", "attached image 2", and so on. (Chat apps drop pasted text when files come along, which is why the write-up is a file.)
 
 **Copy Again** on the island, or menu bar icon → **Copy Last Write-up + Screenshots**, copies it again. If a chat only takes the text, use **Copy Last Screenshots Only** and paste a second time.
 

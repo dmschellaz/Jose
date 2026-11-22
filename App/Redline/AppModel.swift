@@ -145,8 +145,15 @@ final class AppModel {
         guard let markdown = try? String(contentsOf: SessionFolder(url: folder).feedbackURL, encoding: .utf8) else { return false }
         var items: [NSPasteboardItem] = []
         if includeText {
+            // Chat apps attach the clipboard's files and drop its plain text when both are present,
+            // so the write-up travels as a file too. The string stays for apps that only take text.
+            let inline = HandoffPrompt.inline(markdown: markdown)
             let text = NSPasteboardItem()
-            text.setString(HandoffPrompt.inline(markdown: markdown), forType: .string)
+            let file = folder.appending(path: "feedback-for-claude.md")
+            if (try? inline.write(to: file, atomically: true, encoding: .utf8)) != nil {
+                text.setString(file.absoluteString, forType: .fileURL)
+            }
+            text.setString(inline, forType: .string)
             items.append(text)
         }
         for name in HandoffPrompt.imageFiles(in: markdown) {
