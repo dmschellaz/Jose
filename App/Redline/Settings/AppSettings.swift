@@ -15,6 +15,11 @@ final class AppSettings {
     var lastSessionPath: String? {
         didSet { defaults.set(lastSessionPath, forKey: "lastSessionPath") }
     }
+    /// Copy the whole write-up (screenshots pasted separately) instead of a path, for a Claude
+    /// session running on another computer.
+    var pasteForOtherComputer: Bool {
+        didSet { defaults.set(pasteForOtherComputer, forKey: "pasteForOtherComputer") }
+    }
     private(set) var hasAPIKey: Bool
 
     init() {
@@ -23,6 +28,7 @@ final class AppSettings {
         let storedModel = defaults.string(forKey: "reportModel")
         reportModel = storedModel.flatMap { Self.reportModels.contains($0) ? $0 : nil } ?? Self.reportModels[0]
         lastSessionPath = defaults.string(forKey: "lastSessionPath")
+        pasteForOtherComputer = defaults.bool(forKey: "pasteForOtherComputer")
         hasAPIKey = KeychainStore.load() != nil
     }
 

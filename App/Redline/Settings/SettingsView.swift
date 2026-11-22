@@ -29,6 +29,16 @@ struct SettingsView: View {
                 LabeledContent("Folder", value: (settings.outputRoot.path as NSString).abbreviatingWithTildeInPath)
                 Button("Choose…") { chooseFolder() }
             }
+            Section("Hand-off") {
+                Picker("Claude Code runs on", selection: $settings.pasteForOtherComputer) {
+                    Text("This Mac").tag(false)
+                    Text("Another computer").tag(true)
+                }
+                Text(settings.pasteForOtherComputer
+                     ? "Copies the whole write-up. Paste it, then click Copy Screenshots and paste the images."
+                     : "Copies a short prompt that points Claude Code to the session folder on this Mac.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Shortcuts") {
                 KeyboardShortcuts.Recorder("Start / stop session", name: .toggleSession)
                 KeyboardShortcuts.Recorder("Mark moment", name: .markMoment)

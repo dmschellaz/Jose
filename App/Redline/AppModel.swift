@@ -122,15 +122,46 @@ final class AppModel {
             return
         }
         handOff(result, folder: folder)
-        // Keep the pill up briefly as the "Feedback ready" confirmation; banners are easy to miss.
+        // Keep the pill up as the "Feedback ready" confirmation; banners are easy to miss. In paste
+        // mode it also holds the Copy Screenshots button, so give time for the first paste.
         NSSound(named: "Glass")?.play()
-        try? await Task.sleep(for: .seconds(5))
+        try? await Task.sleep(for: .seconds(settings.pasteForOtherComputer ? 60 : 5))
         if case .done = controller.state { pill.hide() }
     }
 
-    private func handOff(_ result: ReportResult, folder: SessionFolder) {
+    /// Copies the whole write-up for pasting into a Claude session on another computer.
+    @discardableResult
+    func copyWriteup(folder: URL) -> Bool {
+        guard let markdown = try? String(contentsOf: SessionFolder(url: folder).feedbackURL, encoding: .utf8) else { return false }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(result.prompt, forType: .string)
+        NSPasteboard.general.setString(HandoffPrompt.inline(markdown: markdown), forType: .string)
+        return true
+    }
+
+    /// Puts the write-up's screenshots on the clipboard, in order, as files (with PNG data) so a chat
+    /// box can attach them.
+    func copyScreenshots(folder: URL) {
+        let session = SessionFolder(url: folder)
+        let markdown = (try? String(contentsOf: session.feedbackURL, encoding: .utf8)) ?? ""
+        let items: [NSPasteboardItem] = HandoffPrompt.imageFiles(in: markdown).compactMap { name in
+            let url = folder.appending(path: name)
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            let item = NSPasteboardItem()
+            item.setString(url.absoluteString, forType: .fileURL)
+            item.setData(data, forType: .png)
+            return item
+        }
+        guard !items.isEmpty else { NSSound.beep(); return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects(items)
+        NSSound(named: "Tink")?.play()
+    }
+
+    private func handOff(_ result: ReportResult, folder: SessionFolder) {
+        if !(settings.pasteForOtherComputer && copyWriteup(folder: folder.url)) {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(result.prompt, forType: .string)
+        }
         settings.lastSessionPath = folder.url.path
         let body = result.usedAI
             ? "\(result.itemCount) item\(result.itemCount == 1 ? "" : "s") copied. Paste into Claude Code."

@@ -61,12 +61,17 @@ private struct PillView: View {
                 Spacer()
             case let .done(result):
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                Text(result.usedAI
-                     ? "Feedback copied (\(result.itemCount) item\(result.itemCount == 1 ? "" : "s")). Paste into Claude Code."
-                     : "Saved without AI write-up. Prompt copied.")
+                let remote = model.settings.pasteForOtherComputer
+                Text(!result.usedAI ? (remote ? "No AI write-up. Transcript copied." : "Saved without AI write-up. Prompt copied.")
+                     : remote ? "Write-up copied (\(result.itemCount)). Paste it, then:"
+                     : "Feedback copied (\(result.itemCount) item\(result.itemCount == 1 ? "" : "s")). Paste into Claude Code.")
                     .font(.caption).lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if let folder = model.controller.lastFolder {
+                    if remote {
+                        Button("Copy Screenshots") { model.copyScreenshots(folder: folder.url) }
+                            .controlSize(.small).buttonStyle(.borderedProminent)
+                    }
                     Button("Open Folder") { NSWorkspace.shared.open(folder.url) }
                         .controlSize(.small)
                 }

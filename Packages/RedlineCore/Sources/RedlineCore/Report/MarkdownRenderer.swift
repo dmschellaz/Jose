@@ -95,4 +95,25 @@ public enum HandoffPrompt {
         if path.contains(" ") { path = "\"\(path)\"" }
         return "Read \(path) and the screenshots it links, then make each revision in this project. Ask me if an item is ambiguous."
     }
+
+    /// Image files linked from a feedback.md, in order.
+    public static func imageFiles(in markdown: String) -> [String] {
+        markdown.matches(of: imageLink).map { String($0.output.1) }
+    }
+
+    /// The whole write-up as one paste, for a Claude session on another computer that can't read
+    /// the session folder. Screenshots are pasted separately, so each link becomes "attached image N".
+    public static func inline(markdown: String) -> String {
+        let files = imageFiles(in: markdown)
+        var body = markdown
+        for (i, file) in files.enumerated() {
+            body = body.replacingOccurrences(of: "![](\(file))", with: "attached image \(i + 1) (\(file))")
+        }
+        let images = files.isEmpty
+            ? "There are no screenshots."
+            : "I'm attaching \(files.count) screenshot\(files.count == 1 ? "" : "s") in order; \"attached image N\" below refers to them."
+        return "Here is feedback I recorded on my app. \(images) Make each revision in this project. Ask me if an item is ambiguous.\n\n" + body
+    }
+
+    nonisolated(unsafe) private static let imageLink = /!\[\]\(([^)\s]+)\)/
 }

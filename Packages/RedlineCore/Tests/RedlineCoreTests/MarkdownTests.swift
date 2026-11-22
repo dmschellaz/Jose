@@ -85,3 +85,19 @@ private let item = FeedbackItem(title: "Billing card padding is too tight", mome
     #expect(MarkdownRenderer.timestamp(-.infinity) == "00:00")
     #expect(MarkdownRenderer.timestamp(75) == "01:15")
 }
+
+@Test func inlineHandoffNumbersAttachedImages() {
+    let md = "# Feedback\n## 1. A\n- **Screenshot:** ![](01-a.png) — red oval\n## 2. B\n- **Screenshot:** ![](02-b.png)\n"
+    #expect(HandoffPrompt.imageFiles(in: md) == ["01-a.png", "02-b.png"])
+    let text = HandoffPrompt.inline(markdown: md)
+    #expect(text.hasPrefix("Here is feedback I recorded on my app. I'm attaching 2 screenshots in order;"))
+    #expect(text.contains("- **Screenshot:** attached image 1 (01-a.png) — red oval"))
+    #expect(text.contains("attached image 2 (02-b.png)"))
+    #expect(!text.contains("!["))
+}
+
+@Test func inlineHandoffWithoutImages() {
+    let text = HandoffPrompt.inline(markdown: "# Feedback\n")
+    #expect(HandoffPrompt.imageFiles(in: "# Feedback\n").isEmpty)
+    #expect(text.contains("There are no screenshots."))
+}
