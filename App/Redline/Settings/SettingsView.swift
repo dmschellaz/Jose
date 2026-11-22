@@ -4,15 +4,20 @@ import SwiftUI
 struct SettingsView: View {
     @Bindable var settings: AppSettings
     @State private var keyDraft = ""
+    @State private var saveFailed = false
 
     var body: some View {
         Form {
             Section("Claude API") {
                 SecureField(settings.hasAPIKey ? "Key saved. Paste a new one to replace it" : "Paste your API key", text: $keyDraft)
-                    .onSubmit { settings.setAPIKey(keyDraft); keyDraft = "" }
+                    .onSubmit { saveDraft() }
                 HStack {
-                    Button("Save Key") { settings.setAPIKey(keyDraft); keyDraft = "" }.disabled(keyDraft.isEmpty)
-                    Button("Remove Key", role: .destructive) { settings.setAPIKey("") }.disabled(!settings.hasAPIKey)
+                    Button("Save Key") { saveDraft() }
+                        .disabled(keyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button("Remove Key", role: .destructive) { settings.removeAPIKey(); saveFailed = false }.disabled(!settings.hasAPIKey)
+                }
+                if saveFailed {
+                    Text("Couldn't save the key to Keychain.").font(.caption).foregroundStyle(.red)
                 }
                 Picker("Report model", selection: $settings.reportModel) {
                     ForEach(AppSettings.reportModels, id: \.self) { Text($0) }
@@ -33,6 +38,16 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 460)
         .onAppear { NSApp.activate() }
+    }
+
+    private func saveDraft() {
+        guard !keyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        if settings.setAPIKey(keyDraft) {
+            keyDraft = ""
+            saveFailed = false
+        } else {
+            saveFailed = true
+        }
     }
 
     private func chooseFolder() {

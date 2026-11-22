@@ -12,10 +12,13 @@ enum KeychainStore {
     }
 
     static func save(_ key: String) throws {
-        delete()
-        var query = baseQuery
-        query[kSecValueData as String] = Data(key.utf8)
-        let status = SecItemAdd(query as CFDictionary, nil)
+        let data = Data(key.utf8)
+        var status = SecItemUpdate(baseQuery as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if status == errSecItemNotFound {
+            var query = baseQuery
+            query[kSecValueData as String] = data
+            status = SecItemAdd(query as CFDictionary, nil)
+        }
         guard status == errSecSuccess else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(status)) }
     }
 

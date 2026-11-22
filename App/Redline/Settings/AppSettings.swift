@@ -20,18 +20,27 @@ final class AppSettings {
     init() {
         outputRoot = defaults.string(forKey: "outputRoot").map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? FileManager.default.homeDirectoryForCurrentUser.appending(path: "Feedback", directoryHint: .isDirectory)
-        reportModel = defaults.string(forKey: "reportModel") ?? Self.reportModels[0]
+        let storedModel = defaults.string(forKey: "reportModel")
+        reportModel = storedModel.flatMap { Self.reportModels.contains($0) ? $0 : nil } ?? Self.reportModels[0]
         lastSessionPath = defaults.string(forKey: "lastSessionPath")
         hasAPIKey = KeychainStore.load() != nil
     }
 
-    func setAPIKey(_ key: String) {
+    @discardableResult
+    func setAPIKey(_ key: String) -> Bool {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            KeychainStore.delete()
-        } else {
-            try? KeychainStore.save(trimmed)
+        guard !trimmed.isEmpty else { return false }
+        do {
+            try KeychainStore.save(trimmed)
+        } catch {
+            return false
         }
+        hasAPIKey = KeychainStore.load() != nil
+        return true
+    }
+
+    func removeAPIKey() {
+        KeychainStore.delete()
         hasAPIKey = KeychainStore.load() != nil
     }
 
