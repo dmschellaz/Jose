@@ -43,7 +43,7 @@ The mode is picked from the menu bar dropdown. The selection is remembered, and 
 2. Navigate your app and talk. Clicks, URL changes and sentences are logged. Depending on the mode, marks appear.
 3. Press **⌃⌥F** again to stop. The pill shows "Writing report…".
 4. When done: the report folder is written, the prompt is copied to the clipboard, and a notification appears ("5 items copied — paste into Claude Code") with an **Open folder** action.
-5. **Esc** while recording cancels the session and discards it, after a confirmation in the pill.
+5. **Cancel** in the pill (click twice to confirm) or the menu cancels the session and discards it. Esc isn't used, because a global Esc would steal it from the app being reviewed.
 
 All hotkeys can be rebound in Settings.
 
@@ -119,7 +119,7 @@ Each unit has one job and a narrow interface; the SessionController is the only 
 - The pen activates only when **⌥ is held alone** (no other modifier) for ≥ 150 ms, and is cancelled if another key or modifier is pressed. This way pressing ⌃⌥F or ⌃⌥M never triggers the pen.
 
 **CaptureService**
-- `SCStream` on the display currently under the cursor (it switches displays when the cursor moves to another one). Runs at 2 fps into an in-memory ring buffer of the last 10 s.
+- `SCStream` on the display currently under the cursor (it switches displays when the cursor moves to another one). Phase 1 takes keyframes on events and every 5 s. Phase 2 adds a 2 fps in-memory ring buffer of the last 10 s for Live mode.
 - `SCContentFilter` **excludes Redline's own windows** (overlay and pill), so every frame is clean.
 - `snapshot(at:)` returns the buffered frame closest to a timestamp. `captureNow()` grabs a fresh full-resolution frame via `SCScreenshotManager`. A fresh frame is taken on every click (about 300 ms after, to catch the result), on every finished sentence, and on every ⌃⌥M.
 - Keyframes are persisted to `raw/` as they're taken (not held only in memory), so a crash still leaves usable material.
@@ -131,7 +131,7 @@ Each unit has one job and a narrow interface; the SessionController is the only 
 - Interface: an `AsyncStream<ContextEvent>`.
 
 **SpeechService**
-- `AVAudioEngine` input with **voice processing enabled** (echo cancellation, so Chatty's own voice isn't transcribed), feeding `SpeechAnalyzer` + `SpeechTranscriber` (on-device).
+- `AVAudioEngine` input, with **voice processing** (echo cancellation, so Chatty's own voice isn't transcribed) enabled only in Chatty mode because it ducks other audio,, feeding `SpeechAnalyzer` + `SpeechTranscriber` (on-device).
 - Emits `volatile` (partial) and `final` sentence results with start/end timestamps. Partials drive a live caption in the pill; finals go into the timeline and trigger LiveAnnotator.
 - Also emits `userStartedSpeaking`, used for barge-in in Chatty.
 
@@ -151,7 +151,7 @@ Each unit has one job and a narrow interface; the SessionController is the only 
   - the frame at the sentence's midpoint, downscaled to 1280px wide (JPEG, about 1.5k image tokens)
   - the last 3 sentences, clicks during the sentence (converted to image coordinates), and the current URL
   - a system prompt explaining the job: "mark what the user is referring to; prefer one shape; caption ≤ 8 words"
-- Forces a tool call to `annotate`:
+- Asks for an `annotate` result via structured outputs (forced `tool_choice` is rejected by current models):
   ```json
   { "marks": [ { "shape": "circle|rect|arrow|highlight", "x": 0, "y": 0, "w": 0, "h": 0,
                  "x2": 0, "y2": 0, "caption": "string" } ],
@@ -177,7 +177,7 @@ Each unit has one job and a narrow interface; the SessionController is the only 
 1. **Segment:** group sentences into candidate moments. A boundary is a gap ≥ 4 s, a URL change, or an explicit ⌃⌥M.
 2. **Pick keyframes:** for each moment, use the keyframe nearest to the moment's last user mark, AI mark or click, falling back to the moment's midpoint.
 3. **Compose:** draw that moment's user and AI annotations onto the clean keyframe (Core Graphics, same style as the overlay). Save as `NN-<slug>.png`.
-4. **Write-up:** one call to the report model (default `claude-sonnet-5-5`, configurable to `claude-opus-5-5`) with the full transcript, the timeline summary (URLs, clicks, AI marks), and the annotated moment images (downscaled to 1280px for the call; full resolution on disk). Forced tool `write_report` returns `items[]`: `{title, momentIds[], where, problem, wanted, quote, imageCaption}`. The model may merge moments into one item, or drop moments that aren't feedback (small talk, "ok next page").
+4. **Write-up:** one call to the report model (default `claude-sonnet-5-5`, configurable to `claude-opus-5-5`) with the full transcript, the timeline summary (URLs, clicks, AI marks), and the annotated moment images (downscaled to 1280px for the call; full resolution on disk). Structured outputs (`output_config.format` with a JSON schema; forced `tool_choice` is rejected by current models) return `items[]`: `{title, momentIds[], where, problem, wanted, quote, imageCaption}`. The model may merge moments into one item, or drop moments that aren't feedback (small talk, "ok next page").
 5. **Render** `feedback.md` from the items (templated in Swift, not model-written Markdown, so the format is stable), plus the full transcript.
 6. **Hand off:** copy the prompt, post the notification.
 - **Regenerate:** re-runs steps 4–6 from `session.json` + `raw/` (e.g. after fixing an API key or switching models).
@@ -189,7 +189,7 @@ State machine: `idle → recording(mode) → finalizing → done | failed`. It o
 
 | Situation | Behavior |
 |---|---|
-| Missing permission at start | Session doesn't start. The pill says which permission; clicking it opens that System Settings pane. |
+| Missing permission at start | Session doesn't start. The Setup window opens, listing each missing permission with a button that requests it or opens its System Settings pane. |
 | Screen Recording grant not appearing | Known macOS quirk: grants only register when launched as a `.app` (not from Terminal). Onboarding says so; dev builds launch via `open`. |
 | No API key | Manual mode records normally. At stop it writes `raw/`, `session.json`, and a fallback `feedback.md` (one section per moment with screenshot and transcript, no AI write-up), then copies that. Live and Chatty refuse to start and suggest Manual. |
 | Network/API failure during Live | Marks silently skipped; recording continues. A small "AI offline" dot in the pill. |
