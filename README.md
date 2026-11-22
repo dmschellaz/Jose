@@ -18,7 +18,7 @@ Requires macOS 26+, Xcode, and [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 3. `make run` builds and launches the menu bar app. Always launch through `make run` or `open`, so macOS attributes permissions to Redline.
 4. On first launch, grant the permissions in the setup window and add your Claude API key in Settings.
 
-Press ⌃⌥F to start or stop a session, ⌃⌥M to mark a moment, and hold ⌥ to draw.
+Press ⌃⌥⇧F to start or stop a session, ⌃⌥⇧M to mark a moment, and hold ⌥ to draw.
 
 ## Docs
 - [Design spec](docs/superpowers/specs/2026-11-22-redline-feedback-app-design.md)

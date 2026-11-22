@@ -6,8 +6,7 @@ import SwiftUI
 final class OverlayController: SessionService {
     private var panels: [(panel: NSPanel, model: OverlayModel)] = []
     private var context: SessionContext?
-    /// The app that was in front before the pen took over; focus goes back to it on pen-up.
-    private var appBeforePen: NSRunningApplication?
+    private var penCursorTimer: Timer?
 
     func start(context: SessionContext) async throws {
         await stop()
@@ -35,23 +34,21 @@ final class OverlayController: SessionService {
         updateCursorOwnership(penActive: active)
     }
 
-    /// macOS only lets the active app control the cursor; a background app's NSCursor.set() is
-    /// overridden by the frontmost app on the next mouse move. So while the pen is held Redline
-    /// becomes the active app (its overlay covers the screen), then hands focus back on pen-up.
+    /// Redline never becomes the active app (macOS 14+ refuses activation requests the user didn't
+    /// make in Redline), and a background app's NSCursor.set() is normally ignored. BackgroundCursor
+    /// opts this process in to setting the cursor from the background; while the pen is held we
+    /// re-assert the crosshair at 30 Hz in case the app underneath resets it.
     private func updateCursorOwnership(penActive: Bool) {
+        penCursorTimer?.invalidate()
+        penCursorTimer = nil
         if penActive {
-            if appBeforePen == nil, let front = NSWorkspace.shared.frontmostApplication,
-               front.processIdentifier != ProcessInfo.processInfo.processIdentifier {
-                appBeforePen = front
-            }
-            NSApp.activate()
+            BackgroundCursor.enable()
             NSCursor.crosshair.set()
+            penCursorTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { _ in
+                MainActor.assumeIsolated { NSCursor.crosshair.set() }
+            }
         } else {
             NSCursor.arrow.set()
-            if let previous = appBeforePen {
-                appBeforePen = nil
-                previous.activate()
-            }
         }
     }
 

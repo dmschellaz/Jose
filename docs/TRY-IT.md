@@ -35,11 +35,11 @@ Menu bar icon → **Settings…** → paste your key → **Save Key**. The key i
 ## 4. Record a feedback session
 
 1. Open the web app you're working on (e.g. `http://localhost:3000`) in Chrome, Safari or Arc.
-2. Press **⌃⌥F** (Control-Option-F). You hear a pop and a pill appears at the top of the screen showing the timer and your words as you speak.
+2. Press **⌃⌥⇧F** (Control-Option-Shift-F). You hear a pop and a pill appears at the top of the screen showing the timer and your words as you speak.
 3. Walk through the app and talk: "the header logo is too small".
 4. **Hold ⌥ (Option) on its own** for a moment: the screen tints and the cursor becomes a crosshair. Drag to circle the thing you mean, then let go. The red mark fades after a few seconds but is kept for the report.
-5. Click to another page and keep going. Press **⌃⌥M** to split feedback into a new item if you want.
-6. Press **⌃⌥F** again (or **Stop** in the pill). The pill shows "Writing report…".
+5. Click to another page and keep going. Press **⌃⌥⇧M** to split feedback into a new item if you want.
+6. Press **⌃⌥⇧F** again (or **Stop** in the pill). The pill shows "Writing report…".
 
 A notification says **Feedback ready** and the prompt is now on your clipboard.
 

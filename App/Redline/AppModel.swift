@@ -35,6 +35,7 @@ final class AppModel {
 
     func launch() {
         Notifier.setUp()
+        Hotkeys.migrateOldDefaults()
         KeyboardShortcuts.onKeyUp(for: .toggleSession) { [weak self] in Task { @MainActor in await self?.toggleSession() } }
         KeyboardShortcuts.onKeyUp(for: .markMoment) { [weak self] in Task { @MainActor in self?.markMoment() } }
         if !Permission.missing.isEmpty { onboarding.show() }

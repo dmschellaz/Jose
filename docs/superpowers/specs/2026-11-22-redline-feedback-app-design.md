@@ -32,16 +32,16 @@ The first use case is reviewing **web apps running in a browser** (e.g. `localho
 
 | Mode | During session | Model calls | Intended for |
 |---|---|---|---|
-| **Manual** | You narrate. Hold **⌥ (Option)** to draw with a pen; tap **⌃⌥M** to mark a moment. No live AI. | 1 at end (report) | Lowest token use |
+| **Manual** | You narrate. Hold **⌥ (Option)** to draw with a pen; tap **⌃⌥⇧M** to mark a moment. No live AI. | 1 at end (report) | Lowest token use |
 | **Live** | AI draws circles/arrows/highlights and a short caption for what it thinks you mean. Silent. You can still use the pen. | ~1 per finished sentence + 1 report | See and correct the AI's understanding |
 | **Chatty** | Live, plus the AI speaks a short confirmation and may ask one clarifying question. | ~1 per sentence + speech + 1 report | Hands-free, conversational review |
 
 The mode is picked from the menu bar dropdown. The selection is remembered, and the default is set in Settings.
 
 ### 3.2 Session flow
-1. Press **⌃⌥F** to start. A small recording pill appears near the menu bar showing the mode and elapsed time, and a soft start chime plays.
+1. Press **⌃⌥⇧F** to start. A small recording pill appears near the menu bar showing the mode and elapsed time, and a soft start chime plays.
 2. Navigate your app and talk. Clicks, URL changes and sentences are logged. Depending on the mode, marks appear.
-3. Press **⌃⌥F** again to stop. The pill shows "Writing report…".
+3. Press **⌃⌥⇧F** again to stop. The pill shows "Writing report…".
 4. When done: the report folder is written, the prompt is copied to the clipboard, and a notification appears ("5 items copied — paste into Claude Code") with an **Open folder** action.
 5. **Cancel** in the pill (click twice to confirm) or the menu cancels the session and discards it. Esc isn't used, because a global Esc would steal it from the app being reviewed.
 
@@ -114,14 +114,14 @@ Each unit has one job and a narrow interface; the SessionController is the only 
 - First-run onboarding: requests Screen Recording, Microphone, Speech Recognition, Accessibility (for the event tap), and Automation (browser URL). Each step deep-links into the matching System Settings pane and re-checks on return.
 
 **HotkeyService**
-- Registers ⌃⌥F (toggle session), ⌃⌥M (mark moment) and Esc (cancel, only while recording) via `KeyboardShortcuts`.
+- Registers ⌃⌥⇧F (toggle session), ⌃⌥⇧M (mark moment) and Esc (cancel, only while recording) via `KeyboardShortcuts`.
 - The pen modifier (hold ⌥) is detected by the listen-only `CGEvent` tap in ContextService (flagsChanged). This follows Clicky's finding that event taps detect modifier-only gestures more reliably than AppKit global monitors.
-- The pen activates only when **⌥ is held alone** (no other modifier) for ≥ 150 ms, and is cancelled if another key or modifier is pressed. This way pressing ⌃⌥F or ⌃⌥M never triggers the pen.
+- The pen activates only when **⌥ is held alone** (no other modifier) for ≥ 150 ms, and is cancelled if another key or modifier is pressed. This way pressing ⌃⌥⇧F or ⌃⌥⇧M never triggers the pen.
 
 **CaptureService**
 - `SCStream` on the display currently under the cursor (it switches displays when the cursor moves to another one). Phase 1 takes keyframes on events and every 5 s. Phase 2 adds a 2 fps in-memory ring buffer of the last 10 s for Live mode.
 - `SCContentFilter` **excludes Redline's own windows** (overlay and pill), so every frame is clean.
-- `snapshot(at:)` returns the buffered frame closest to a timestamp. `captureNow()` grabs a fresh full-resolution frame via `SCScreenshotManager`. A fresh frame is taken on every click (about 300 ms after, to catch the result), on every finished sentence, and on every ⌃⌥M.
+- `snapshot(at:)` returns the buffered frame closest to a timestamp. `captureNow()` grabs a fresh full-resolution frame via `SCScreenshotManager`. A fresh frame is taken on every click (about 300 ms after, to catch the result), on every finished sentence, and on every ⌃⌥⇧M.
 - Keyframes are persisted to `raw/` as they're taken (not held only in memory), so a crash still leaves usable material.
 
 **ContextService**
@@ -174,7 +174,7 @@ Each unit has one job and a narrow interface; the SessionController is the only 
 - `Codable`; written to `session.json` incrementally (every 5 s and on stop).
 
 **ReportBuilder**
-1. **Segment:** group sentences into candidate moments. A boundary is a gap ≥ 4 s, a URL change, or an explicit ⌃⌥M.
+1. **Segment:** group sentences into candidate moments. A boundary is a gap ≥ 4 s, a URL change, or an explicit ⌃⌥⇧M.
 2. **Pick keyframes:** for each moment, use the keyframe nearest to the moment's last user mark, AI mark or click, falling back to the moment's midpoint.
 3. **Compose:** draw that moment's user and AI annotations onto the clean keyframe (Core Graphics, same style as the overlay). Save as `NN-<slug>.png`.
 4. **Write-up:** one call to the report model (default `claude-sonnet-5-5`, configurable to `claude-opus-5-5`) with the full transcript, the timeline summary (URLs, clicks, AI marks), and the annotated moment images (downscaled to 1280px for the call; full resolution on disk). Structured outputs (`output_config.format` with a JSON schema; forced `tool_choice` is rejected by current models) return `items[]`: `{title, momentIds[], where, problem, wanted, quote, imageCaption}`. The model may merge moments into one item, or drop moments that aren't feedback (small talk, "ok next page").
@@ -228,5 +228,5 @@ Each phase is independently usable.
 
 ## 9. Open decisions (defaults chosen; change if desired)
 - **Name:** "Redline" is a working name.
-- **Hotkeys:** ⌃⌥F / ⌃⌥M / hold ⌥ for pen. Hold-⌥ may conflict with apps that use Option-drag; if so, change the pen to hold ⌃⌥.
+- **Hotkeys:** ⌃⌥⇧F / ⌃⌥⇧M / hold ⌥ for pen. (Changed from ⌃⌥F / ⌃⌥M because window managers such as Magnet use ⌃⌥ + letters; ⌃⌥F is Magnet's "Center Third".) Hold-⌥ may conflict with apps that use Option-drag; if so, change the pen to hold ⌃⌥.
 - **Distribution:** local Xcode builds signed with your personal team; no notarization or auto-update in v1.
