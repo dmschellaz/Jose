@@ -68,7 +68,7 @@ private final class IslandPresence {
 
 private enum Island {
     static let width: CGFloat = 600
-    static let contentHeight: CGFloat = 62
+    static let contentHeight: CGFloat = 76
     static let flare: CGFloat = 10      // concave "ears" where the island meets the top edge
     static let cornerRadius: CGFloat = 22
 }
@@ -121,7 +121,7 @@ private struct IslandContent: View {
     let model: AppModel
     let close: () -> Void
     @State private var confirmCancel = false
-    @State private var screenshotsCopied = false
+    @State private var copiedAgain = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -159,17 +159,27 @@ private struct IslandContent: View {
                 let remote = model.settings.pasteForOtherComputer
                 Image(systemName: result.usedAI ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
                     .font(.system(size: 20)).foregroundStyle(result.usedAI ? .green : .yellow)
-                titled(result.usedAI ? "Feedback ready · \(result.itemCount) item\(result.itemCount == 1 ? "" : "s")" : "Saved without AI write-up",
-                       remote ? "Paste the write-up, then the screenshots."
-                              : result.usedAI ? "Prompt copied. Paste into Claude Code." : "Prompt copied. Screenshots and transcript are saved.")
-                if let folder = model.controller.lastFolder {
-                    if remote {
-                        Button(screenshotsCopied ? "Copied ✓" : "Copy Screenshots") {
-                            model.copyScreenshots(folder: folder.url)
-                            screenshotsCopied = true
-                        }
-                        .buttonStyle(IslandButtonStyle(prominent: true))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(result.usedAI ? "Feedback ready · \(result.itemCount) item\(result.itemCount == 1 ? "" : "s")" : result.error == nil ? "No feedback captured" : "Saved without AI write-up")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text(remote ? "Copied with screenshots. Paste into Claude."
+                         : result.usedAI ? "Prompt copied. Paste into Claude Code." : "Prompt copied. Screenshots and transcript are saved.")
+                        .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                    if result.usedAI, let usedModel = result.model {
+                        Text(Pricing.summary(model: usedModel, tokens: result.tokens))
+                            .font(.system(size: 11).monospacedDigit()).foregroundStyle(.tertiary).lineLimit(1)
                     }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if let folder = model.controller.lastFolder {
+                    Button(copiedAgain ? "Copied ✓" : "Copy Again") {
+                        if !(remote && model.copyWriteup(folder: folder.url)) {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(result.prompt, forType: .string)
+                        }
+                        copiedAgain = true
+                    }
+                    .buttonStyle(IslandButtonStyle(prominent: true))
                     Button("Open Folder") { NSWorkspace.shared.open(folder.url) }
                         .buttonStyle(IslandButtonStyle())
                 }

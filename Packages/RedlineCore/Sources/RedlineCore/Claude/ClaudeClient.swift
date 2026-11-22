@@ -58,6 +58,8 @@ public struct MessagesResponse: Decodable, Sendable {
         public var output_tokens: Int
     }
     public var content: [Block]
+    /// The model that actually served the request (a server-side fallback can differ from the one asked for).
+    public var model: String?
     public var stop_reason: String?
     public var usage: Usage?
 

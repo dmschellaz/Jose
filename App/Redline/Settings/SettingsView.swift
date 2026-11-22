@@ -35,7 +35,7 @@ struct SettingsView: View {
                     Text("Another computer").tag(true)
                 }
                 Text(settings.pasteForOtherComputer
-                     ? "Copies the whole write-up. Paste it, then click Copy Screenshots and paste the images."
+                     ? "Copies the whole write-up and its screenshots. Paste once into the Claude chat."
                      : "Copies a short prompt that points Claude Code to the session folder on this Mac.")
                     .font(.caption).foregroundStyle(.secondary)
             }

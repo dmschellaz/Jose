@@ -37,15 +37,15 @@ Menu bar icon → **Settings…** → paste your key → **Save Key** (pasting a
 ## 4. Record a feedback session
 
 1. Open the web app you're working on (e.g. `http://localhost:3000`) in Chrome, Safari or Arc.
-2. Press **⌃⌥⇧F** (Control-Option-Shift-F). You hear a pop and a pill appears at the top of the screen showing the timer and your words as you speak.
+2. Press **⌃⌥⇧F** (Control-Option-Shift-F). You hear a pop, other audio on the Mac is muted until you stop, and a black island drops from the top of the screen showing the timer and your words as you speak.
 3. Walk through the app and talk: "the header logo is too small".
 4. **Hold ⌥ (Option) on its own** for a moment: the screen tints and the cursor becomes a crosshair. Drag to circle the thing you mean, then let go. The red mark fades after a few seconds but is kept for the report.
 5. Click to another page and keep going. Press **⌃⌥⇧M** to split feedback into a new item if you want.
-6. Press **⌃⌥⇧F** again (or **Stop** in the pill). The pill shows "Writing report…".
+6. Press **⌃⌥⇧F** again (or **Stop** on the island). Audio comes back on and the island shows "Writing report…".
 
-A notification says **Feedback ready** and the prompt is now on your clipboard.
+The island then shows **Feedback ready**, what's on your clipboard, and a line like `Sonnet 5.5 · 12.3k in · 1.4k out · $0.039`: the model that wrote the report, the tokens it used and the estimated API cost (standard API prices). Close it with **×**.
 
-To throw a session away: **Cancel** in the pill (click twice) or **Cancel Session** in the menu.
+To throw a session away: **Cancel** on the island (click twice) or **Cancel Session** in the menu.
 
 ## 5. Look at the result
 
@@ -68,13 +68,9 @@ Read ~/Feedback/localhost-3000-2026-11-22-1430/feedback.md and the screenshots i
 
 Claude Code reads the Markdown and opens the screenshots itself.
 
-**Claude Code on another computer?** It can't open files on this Mac, so set **Settings → Hand-off → Claude Code runs on: Another computer**. Then stopping a session copies the whole write-up instead of a path:
+**Claude Code on another computer?** It can't open files on this Mac, so set **Settings → Hand-off → Claude Code runs on: Another computer**. Then stopping a session copies the whole write-up **and** its screenshots together: paste once (⌘V) into the Claude chat and send. The write-up refers to the images as "attached image 1", "attached image 2", and so on.
 
-1. Paste (⌘V) into the Claude chat on the other computer. Don't send yet.
-2. Click **Copy Screenshots** on the pill (or menu bar icon → **Copy Last Screenshots**) and paste again; the images attach in order.
-3. Send. The write-up refers to them as "attached image 1", "attached image 2", and so on.
-
-**Copy Last Write-up** in the menu copies the text again if you need it.
+**Copy Again** on the island, or menu bar icon → **Copy Last Write-up + Screenshots**, copies it again. If a chat only takes the text, use **Copy Last Screenshots Only** and paste a second time.
 
 ## Other menu items
 

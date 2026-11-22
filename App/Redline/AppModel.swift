@@ -35,6 +35,10 @@ final class AppModel {
 
     func launch() {
         Notifier.setUp()
+        SystemAudio.restoreOutput()   // undo a mute left behind if Redline quit mid-session
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { SystemAudio.restoreOutput() }
+        }
         Hotkeys.migrateOldDefaults()
         KeyboardShortcuts.onKeyUp(for: .toggleSession) { [weak self] in Task { @MainActor in await self?.toggleSession() } }
         KeyboardShortcuts.onKeyUp(for: .markMoment) { [weak self] in Task { @MainActor in self?.markMoment() } }
@@ -53,6 +57,7 @@ final class AppModel {
     func cancel() async {
         let wasActive = controller.isRecording || isStarting
         await controller.cancel()
+        SystemAudio.restoreOutput()
         if wasActive { pill.hide() }
         partialTranscript = ""
     }
@@ -112,10 +117,14 @@ final class AppModel {
         if let folder = controller.currentFolder { settings.lastSessionPath = folder.url.path }
         pill.show(model: self)
         NSSound(named: "Pop")?.play()
+        // Silence other apps while recording; wait for the start sound to finish first.
+        try? await Task.sleep(for: .milliseconds(300))
+        if controller.isRecording { SystemAudio.muteOutput() }
     }
 
     private func stopSession() async {
         await controller.stop()
+        SystemAudio.restoreOutput()
         partialTranscript = ""
         guard case let .done(result) = controller.state, let folder = controller.lastFolder else {
             pill.hide()
@@ -128,32 +137,30 @@ final class AppModel {
         if !settings.pasteForOtherComputer { pill.hide(after: .seconds(10)) }
     }
 
-    /// Copies the whole write-up for pasting into a Claude session on another computer.
+    /// Copies the whole write-up and its screenshots in one go, for pasting into a Claude chat on
+    /// another computer: the first clipboard item is the text, then one item per screenshot (file URL
+    /// plus PNG data), in order.
     @discardableResult
-    func copyWriteup(folder: URL) -> Bool {
+    func copyWriteup(folder: URL, includeText: Bool = true) -> Bool {
         guard let markdown = try? String(contentsOf: SessionFolder(url: folder).feedbackURL, encoding: .utf8) else { return false }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(HandoffPrompt.inline(markdown: markdown), forType: .string)
-        return true
-    }
-
-    /// Puts the write-up's screenshots on the clipboard, in order, as files (with PNG data) so a chat
-    /// box can attach them.
-    func copyScreenshots(folder: URL) {
-        let session = SessionFolder(url: folder)
-        let markdown = (try? String(contentsOf: session.feedbackURL, encoding: .utf8)) ?? ""
-        let items: [NSPasteboardItem] = HandoffPrompt.imageFiles(in: markdown).compactMap { name in
-            let url = folder.appending(path: name)
-            guard let data = try? Data(contentsOf: url) else { return nil }
-            let item = NSPasteboardItem()
-            item.setString(url.absoluteString, forType: .fileURL)
-            item.setData(data, forType: .png)
-            return item
+        var items: [NSPasteboardItem] = []
+        if includeText {
+            let text = NSPasteboardItem()
+            text.setString(HandoffPrompt.inline(markdown: markdown), forType: .string)
+            items.append(text)
         }
-        guard !items.isEmpty else { NSSound.beep(); return }
+        for name in HandoffPrompt.imageFiles(in: markdown) {
+            let url = folder.appending(path: name)
+            guard let data = try? Data(contentsOf: url) else { continue }
+            let image = NSPasteboardItem()
+            image.setString(url.absoluteString, forType: .fileURL)
+            image.setData(data, forType: .png)
+            items.append(image)
+        }
+        guard !items.isEmpty else { return false }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.writeObjects(items)
-        NSSound(named: "Tink")?.play()
+        return true
     }
 
     private func handOff(_ result: ReportResult, folder: SessionFolder) {

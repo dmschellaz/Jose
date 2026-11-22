@@ -8,8 +8,14 @@ public struct ReportResult: Equatable, Sendable {
     public var prompt: String
     public var error: String?
     public var tokens: TokenUsage
+    /// The model that wrote the report, when the AI ran.
+    public var model: String?
 
-    public init(itemCount: Int, usedAI: Bool, prompt: String, error: String?, tokens: TokenUsage) {
+    /// Estimated API cost in US dollars, when the model's price is known.
+    public var costUSD: Double? { model.flatMap { Pricing.cost(model: $0, tokens: tokens) } }
+
+    public init(itemCount: Int, usedAI: Bool, prompt: String, error: String?, tokens: TokenUsage, model: String? = nil) {
+        self.model = model
         self.itemCount = itemCount
         self.usedAI = usedAI
         self.prompt = prompt
@@ -52,6 +58,7 @@ public struct ReportBuilder: ReportBuilding {
         var usedAI = false
         var errorText: String? = llm == nil ? "No API key set" : nil
         var tokens = TokenUsage()
+        var servedBy: String?
 
         if llm != nil, moments.isEmpty {
             errorText = "Nothing was said or marked in this session."
@@ -70,6 +77,7 @@ public struct ReportBuilder: ReportBuilding {
                 items = try ReportRequest.parse(text, validMomentIDs: Set(moments.map(\.id)))
                 usedAI = true
                 tokens = TokenUsage(input: response.usage?.input_tokens ?? 0, output: response.usage?.output_tokens ?? 0)
+                servedBy = response.model ?? model
             } catch {
                 Self.log(error)
                 errorText = ReportErrorText.describe(error)
@@ -106,7 +114,7 @@ public struct ReportBuilder: ReportBuilding {
         }
 
         return ReportResult(itemCount: items.count, usedAI: usedAI, prompt: HandoffPrompt.make(folder: folder),
-                            error: errorText, tokens: tokens)
+                            error: errorText, tokens: tokens, model: servedBy)
     }
 
     private static func log(_ error: Error) {

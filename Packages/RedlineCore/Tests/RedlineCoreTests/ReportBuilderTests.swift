@@ -45,6 +45,7 @@ private func makeSession() throws -> (SessionDocument, SessionFolder) {
     let result = await ReportBuilder(llm: llm, model: "claude-sonnet-5-5", timeZone: .gmt).build(document: doc, folder: folder)
     #expect(result.usedAI && result.itemCount == 1 && result.error == nil)
     #expect(result.tokens == TokenUsage(input: 100, output: 20))
+    #expect(result.model == "claude-sonnet-5-5")   // response has no model field, so the requested one is used
     let md = try String(contentsOf: folder.feedbackURL, encoding: .utf8)
     #expect(md.contains("## 1. Loosen billing card padding"))
     #expect(md.contains("![](01-loosen-billing-card.png)"))
