@@ -2,7 +2,28 @@ import SwiftUI
 
 struct MenuContent: View {
     let model: AppModel
+
     var body: some View {
+        if model.isRecording {
+            Button("Stop & Write Report") { Task { await model.toggleSession() } }
+            Button("Mark Moment") { model.markMoment() }
+            Button("Cancel Session") { Task { await model.cancel() } }
+        } else {
+            Button(model.isFinalizing ? "Writing report…" : "Start Feedback Session") { Task { await model.toggleSession() } }
+                .disabled(model.isFinalizing)
+        }
+        Text("Mode: Manual. Live & Chatty arrive in later phases.")
+        Divider()
+        Menu("Recent Sessions") {
+            let recent = model.recentSessions()
+            if recent.isEmpty { Text("None yet") }
+            ForEach(recent, id: \.self) { url in
+                Button(url.lastPathComponent) { NSWorkspace.shared.open(url) }
+            }
+        }
+        Button("Regenerate Last Report") { Task { await model.regenerateLast() } }
+            .disabled(model.lastSessionFolder == nil || model.isRecording)
+        Divider()
         Button("Permissions…") { model.showOnboarding() }
         SettingsLink { Text("Settings…") }.keyboardShortcut(",")
         #if DEBUG

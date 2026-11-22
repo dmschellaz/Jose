@@ -1,4 +1,3 @@
-#if PILL_READY
 import AppKit
 import RedlineCore
 import SwiftUI
@@ -69,4 +68,3 @@ private struct PillView: View {
         .background(.regularMaterial, in: Capsule())
     }
 }
-#endif
