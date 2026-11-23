@@ -50,6 +50,24 @@ private func near(_ a: CGRect, _ b: CGRect) -> Bool {
         #expect(try ClaudeHTTPClient(apiKey: "k").makeURLRequest(req).value(forHTTPHeaderField: "anthropic-beta") != nil)
     }
 
+    @Test func thinkingIsOffForLiveModels() throws {
+        let frame = liveTestFrame()
+        func body(_ model: String) throws -> [String: Any] {
+            try json(AnnotateRequest.make(model: model, frame: frame, sentence: "s", recentSentences: [], clicks: [], url: nil))
+        }
+        #expect((try body("claude-haiku-5-5")["thinking"] as? [String: String]) == ["type": "disabled"])
+        #expect((try body("claude-sonnet-5-5")["thinking"] as? [String: String]) == ["type": "between_tools"])
+        #expect(AnnotateRequest.systemPrompt.contains("change the reviewer is asking for"))
+    }
+
+    @Test func normalizedSentenceMatching() {
+        let n = LiveAnnotator.normalize
+        #expect(n("Make THIS purple, please.") == "make this purple please")
+        #expect(LiveAnnotator.sameSentence(n("make this purple"), n("Make this purple.")))
+        #expect(LiveAnnotator.sameSentence(n("show the rolling twelve months"), n("Show the rolling twelve months here.")))
+        #expect(!LiveAnnotator.sameSentence(n("so this one"), n("So this one should be much bigger and bold.")))
+    }
+
     @Test func schemaIsStrict() throws {
         guard case let .object(root) = AnnotateRequest.schema,
               case let .object(props)? = root["properties"],

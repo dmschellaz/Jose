@@ -36,6 +36,20 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
         var recent: [String]
         var clicks: [(point: CGPoint, displayID: UInt32)]
         var url: String?
+        /// Sent early from a settled partial transcript, before the sentence was final.
+        var speculative = false
+    }
+
+    /// An early request made from a settled partial transcript. When the final sentence matches, its
+    /// answer is used for that sentence instead of sending again.
+    private struct Speculation {
+        var key: String           // normalized text
+        var jobID: UUID
+        var done = false
+        var frame: LiveFrame?
+        var marks: [Annotation] = []
+        /// The final sentence that adopted it while it was still in flight.
+        var adoptedBy: (id: UUID, end: Double)?
     }
 
     private struct TimedOut: Error {}
@@ -51,6 +65,7 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
     private var url: String?
     private var inFlight: Task<Void, Never>?
     private var queued: Job?
+    private var speculation: Speculation?
     /// Bumped on start and stop so late results from an earlier session are ignored.
     private var generation = 0
 
@@ -89,6 +104,13 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
         guard context != nil else { return }
         switch event {
         case let .sentence(id, text, start, end):
+            if adopt(sentenceID: id, text: text, end: end) {
+                recent.append(text)
+                if recent.count > Self.contextSentences { recent.removeFirst(recent.count - Self.contextSentences) }
+                clicks = []
+                return
+            }
+            speculation = nil
             let job = Job(sentenceID: id, text: text, start: start, end: end, recent: recent, clicks: clicks, url: url)
             recent.append(text)
             if recent.count > Self.contextSentences { recent.removeFirst(recent.count - Self.contextSentences) }
@@ -108,12 +130,60 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
         }
     }
 
+    /// The live transcript has stopped changing: start annotating now rather than waiting for the
+    /// recognizer to finalize the sentence (that takes 1–4 s). Only when nothing else is in flight.
+    public func speculate(text: String, start: Double, end: Double) {
+        guard context != nil, inFlight == nil, queued == nil else { return }
+        let key = Self.normalize(text)
+        guard key.count >= 3, key != speculation?.key else { return }
+        let job = Job(sentenceID: UUID(), text: text, start: start, end: end, recent: recent, clicks: clicks,
+                      url: url, speculative: true)
+        speculation = Speculation(key: key, jobID: job.sentenceID)
+        send(job)
+    }
+
     // MARK: - Private
+
+    /// Lowercased words only, so punctuation and capitalisation changes at finalization still match.
+    nonisolated static func normalize(_ text: String) -> String {
+        text.lowercased().unicodeScalars
+            .map { CharacterSet.alphanumerics.contains($0) ? Character($0) : " " }
+            .reduce(into: "") { $0.append($1) }
+            .split(separator: " ").joined(separator: " ")
+    }
+
+    /// The final text is the speculated one, give or take a word or two at the end.
+    nonisolated static func sameSentence(_ speculated: String, _ final: String) -> Bool {
+        if speculated == final { return true }
+        let (short, long) = speculated.count <= final.count ? (speculated, final) : (final, speculated)
+        return long.hasPrefix(short) && Double(short.count) >= Double(long.count) * 0.8
+    }
+
+    /// Uses the early answer for this sentence if it was about the same words. Returns false if not.
+    private func adopt(sentenceID id: UUID, text: String, end: Double) -> Bool {
+        guard var spec = speculation, Self.sameSentence(spec.key, Self.normalize(text)) else { return false }
+        if spec.done {
+            speculation = nil
+            deliver(sentenceID: id, end: end, frame: spec.frame, marks: spec.marks)
+        } else {
+            spec.adoptedBy = (id, end)
+            speculation = spec
+        }
+        return true
+    }
+
+    /// Records marks for a final sentence (timeline + feed). Marks were already drawn when they arrived.
+    private func deliver(sentenceID id: UUID, end: Double, frame: LiveFrame?, marks: [Annotation]) {
+        let marks = marks.map { var a = $0; a.createdAt = end; return a }
+        if !marks.isEmpty { context?.emit(.aiAnnotation(sentenceID: id, annotations: marks, say: nil)) }
+        onResult?(id, frame, marks)
+    }
 
     private func resetSession() {
         context = nil
         inFlight = nil
         queued = nil
+        speculation = nil
         recent = []
         clicks = []
         url = nil
@@ -136,7 +206,12 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
         guard let llm, let context else { return }
         var seenFrame: LiveFrame?
         var seenMarks: [Annotation] = []
-        defer { if gen == generation { onResult?(job.sentenceID, seenFrame, seenMarks) } }
+        defer {
+            if gen == generation {
+                if job.speculative { finishSpeculation(job.sentenceID, frame: seenFrame, marks: seenMarks) }
+                else { onResult?(job.sentenceID, seenFrame, seenMarks) }
+            }
+        }
         let wanted = (job.start + job.end) / 2
         guard let frame = await frame(wanted), gen == generation else {
             liveLog.error("No frame for sentence [\(job.start, format: .fixed(precision: 1))–\(job.end, format: .fixed(precision: 1))]; skipped")
@@ -163,12 +238,29 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
             status = .ok
             seenMarks = marks
             guard !marks.isEmpty else { return }
+            if job.speculative {
+                onMarks?(marks)   // draw now; recorded when the final sentence adopts it
+                return
+            }
             context.emit(.aiAnnotation(sentenceID: job.sentenceID, annotations: marks, say: nil))
             onMarks?(marks)
         } catch {
             guard gen == generation else { return }
             liveLog.error("Live request failed: \(String(describing: error), privacy: .public)")
             status = .offline
+        }
+    }
+
+    private func finishSpeculation(_ jobID: UUID, frame: LiveFrame?, marks: [Annotation]) {
+        guard var spec = speculation, spec.jobID == jobID else { return }
+        if let adopted = spec.adoptedBy {
+            speculation = nil
+            deliver(sentenceID: adopted.id, end: adopted.end, frame: frame, marks: marks)
+        } else {
+            spec.done = true
+            spec.frame = frame
+            spec.marks = marks
+            speculation = spec
         }
     }
 

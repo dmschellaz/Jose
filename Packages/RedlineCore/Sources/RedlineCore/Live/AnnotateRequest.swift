@@ -23,7 +23,9 @@ public enum AnnotateRequest {
     - shape says how to draw the mark around that box: "circle" for a small thing or a single value, "rect" for \
     a card, panel or area, "highlight" for a line of text, "arrow" to point at something small or easily missed.
     - Prefer one mark; use two or three only if they clearly point at several things.
-    - caption: at most 8 words naming what you marked.
+    - caption: the change the reviewer is asking for, as a short instruction of at most 8 words, written like a \
+    note on a printout: "Rename to NSR revenue", "Make this purple", "Show in thousands". Don't describe what is \
+    there now. If they only point at something without asking for a change, name it briefly.
     - If the sentence doesn't refer to anything on screen (thinking aloud, "ok, next"), return no marks.
     """
 
@@ -78,7 +80,16 @@ public enum AnnotateRequest {
             system: systemPrompt,
             messages: [.init(role: "user", content: [.jpeg(frame.jpeg), .text(lines.joined(separator: "\n"))])],
             output_config: .init(effort: "low", format: .init(schema: schema)),
+            thinking: thinking(for: model),
             fallbacks: model.hasPrefix("claude-sonnet") ? "default" : nil)
+    }
+
+    /// Thinking off: a live mark is a quick look, and reasoning made answers several seconds slower.
+    /// Haiku turns it off with "disabled"; Sonnet 5.5 rejects that and uses "between_tools" (no tools here).
+    static func thinking(for model: String) -> MessagesRequest.Thinking? {
+        if model.hasPrefix("claude-haiku") { return .init(type: "disabled") }
+        if model.hasPrefix("claude-sonnet-5-5") { return .init(type: "between_tools") }
+        return nil
     }
 
     private struct Mark: Decodable {

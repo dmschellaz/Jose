@@ -28,7 +28,12 @@ final class AppModel {
     var isFinalizing: Bool { controller.state == .finalizing }
     var isReviewing: Bool { controller.state == .reviewing }
     /// Ready for the next point: not mid-sentence and nothing waiting for the live AI.
-    var isReady: Bool { partialTranscript.isEmpty && !feed.isWaiting }
+    /// A settled partial counts as finished once its early live marks are back.
+    var isReady: Bool {
+        (partialTranscript.isEmpty || partialTranscript == settledTranscript) && liveStatus != .working && !feed.isWaiting
+    }
+    /// The last live transcript that stopped changing (see SpeechService.onSettled).
+    private(set) var settledTranscript = ""
     var lastSessionFolder: URL? { settings.lastSessionPath.map { URL(fileURLWithPath: $0) } }
 
     init() {
@@ -42,6 +47,10 @@ final class AppModel {
         controller.holdReportForReview = true   // the island lists the sentences; the user picks, then copies
         context.onPen = { [overlay] in overlay.setPen($0) }
         speech.onPartial = { [weak self] in self?.partialTranscript = $0 }
+        speech.onSettled = { [weak self] text, start, end in
+            self?.settledTranscript = text
+            self?.live.speculate(text: text, start: start, end: end)
+        }
         live.onMarks = { [overlay] marks in for m in marks { overlay.display(m, lifetime: 6) } }
         live.onStatus = { [weak self] in self?.setLiveStatus($0) }
         live.onResult = { [feed] id, frame, marks in feed.liveResult(sentenceID: id, frame: frame, marks: marks) }

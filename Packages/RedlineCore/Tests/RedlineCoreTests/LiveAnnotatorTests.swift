@@ -127,6 +127,59 @@ private func sentence(_ text: String, at t: Double) -> TimelineEvent {
         #expect(sink.results[2].id == third && sink.results[2].hadFrame && sink.results[2].marks == 0)
     }
 
+    @Test func settledTranscriptIsAnnotatedEarlyAndAdoptedByTheFinalSentence() async throws {
+        let llm = GatedLLM(autoRelease: true)
+        let (a, sink) = try await makeAnnotator(llm)
+        a.speculate(text: "make this card purple", start: 1, end: 3)
+        await waitUntil { sink.marks.count == 1 }
+        #expect(sink.marks.count == 1)          // drawn before the sentence is final
+        #expect(sink.events.isEmpty)            // but not recorded yet
+        let id = UUID()
+        a.observe(.sentence(id: id, text: "Make this card purple.", start: 1, end: 3.4))
+        #expect(await llm.count == 1)           // no second request
+        guard case let .aiAnnotation(sid, marks, _)? = sink.events.first else { Issue.record("no event"); return }
+        #expect(sid == id && marks.first?.createdAt == 3.4)
+        #expect(sink.results.map(\.id) == [id])
+    }
+
+    @Test func finalSentenceAdoptsAnEarlyRequestStillInFlight() async throws {
+        let llm = GatedLLM()
+        let (a, sink) = try await makeAnnotator(llm)
+        a.speculate(text: "show the rolling twelve months", start: 1, end: 3)
+        await waitUntil { await llm.count == 1 }
+        let id = UUID()
+        a.observe(.sentence(id: id, text: "Show the rolling twelve months here.", start: 1, end: 3.5))
+        #expect(sink.events.isEmpty)
+        await llm.release(0)
+        await waitUntil { !sink.events.isEmpty }
+        guard case let .aiAnnotation(sid, _, _)? = sink.events.first else { Issue.record("no event"); return }
+        #expect(sid == id)
+        #expect(await llm.count == 1)
+    }
+
+    @Test func differentFinalSentenceIsSentAgain() async throws {
+        let llm = GatedLLM(autoRelease: true)
+        let (a, sink) = try await makeAnnotator(llm)
+        a.speculate(text: "so this one", start: 1, end: 2)
+        await waitUntil { sink.marks.count == 1 }
+        let id = UUID()
+        a.observe(.sentence(id: id, text: "So this one should be much bigger and bold.", start: 1, end: 4))
+        await waitUntil { await llm.count == 2 }
+        await waitUntil { !sink.events.isEmpty }
+        guard case let .aiAnnotation(sid, _, _)? = sink.events.first else { Issue.record("no event"); return }
+        #expect(sid == id)
+    }
+
+    @Test func speculationWaitsWhileARequestIsInFlight() async throws {
+        let llm = GatedLLM()
+        let (a, _) = try await makeAnnotator(llm)
+        a.observe(sentence("first", at: 0))
+        await waitUntil { await llm.count == 1 }
+        a.speculate(text: "second thing here", start: 2, end: 3)
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(await llm.count == 1)
+    }
+
     @Test func timeoutGoesOfflineAndEmitsNothing() async throws {
         let llm = GatedLLM()
         let (a, sink) = try await makeAnnotator(llm, timeout: .milliseconds(30))
