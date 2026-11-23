@@ -177,6 +177,9 @@ public final class SessionController {
     public func handle(_ event: TimelineEvent) {
         guard accepting else { return }
         events.append(event)
+        for service in started {
+            (service as? any TimelineObserving)?.observe(event)
+        }
         guard isRecording else { return }
 
         let reason: KeyframeReason
@@ -206,6 +209,7 @@ public final class SessionController {
         generation += 1
         tickTask?.cancel()
         tickTask = nil
+        let reporters = started.compactMap { $0 as? any TokenReporting }
         await stopStarted()   // services may still emit final events here
         accepting = false
 
@@ -223,8 +227,10 @@ public final class SessionController {
         self.metadata = metadata
         persist()
 
-        let result = await reportBuilder().build(document: document(), folder: folder)
-        self.metadata?.tokens = result.tokens
+        var result = await reportBuilder().build(document: document(), folder: folder)
+        result.liveTokens = reporters.reduce(TokenUsage()) { $0 + $1.tokensUsed }
+        result.liveModel = reporters.lazy.compactMap(\.modelUsed).first
+        self.metadata?.tokens = result.tokens + result.liveTokens
         persist()
         lastFolder = folder
         reset()
