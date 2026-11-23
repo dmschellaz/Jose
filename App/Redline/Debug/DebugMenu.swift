@@ -34,7 +34,7 @@ struct DebugMenu: View {
                         let d = NSScreen.main?.displayID ?? 0
                         let b = CGDisplayBounds(d)
                         overlay.display(Annotation(shape: .circle(center: CGPoint(x: b.midX, y: b.midY), radius: 80),
-                                                   caption: nil, author: .ai, createdAt: 0, displayID: d), lifetime: 6)
+                                                   caption: "Billing card padding", author: .ai, createdAt: 0, displayID: d), lifetime: 6)
                     }
                 }
             }

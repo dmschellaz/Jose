@@ -8,6 +8,8 @@ final class AppModel {
     let settings = AppSettings()
     private(set) var partialTranscript = ""
     private(set) var isStarting = false
+    /// Live annotation health, for the island's status dot. LiveAnnotator.onStatus feeds this.
+    private(set) var liveStatus: LiveStatus = .idle
     @ObservationIgnored private var isRegenerating = false
     @ObservationIgnored private(set) var controller: SessionController!
 
@@ -60,6 +62,7 @@ final class AppModel {
         let wasActive = controller.isRecording || isStarting
         await controller.cancel()
         SystemAudio.restoreOutput()
+        liveStatus = .idle
         if wasActive { pill.hide() }
         partialTranscript = ""
     }
@@ -71,6 +74,8 @@ final class AppModel {
     }
 
     func showOnboarding() { onboarding.show() }
+
+    func setLiveStatus(_ status: LiveStatus) { liveStatus = status }
 
     func regenerateLast() async {
         guard let url = lastSessionFolder, !isRegenerating, !isFinalizing, !isRecording else { return }
@@ -107,9 +112,16 @@ final class AppModel {
             onboarding.show()
             return
         }
+        let mode = settings.sessionMode
+        if mode == .live && settings.apiKey() == nil {
+            Notifier.post(title: "Can't start Live mode",
+                          body: "Live mode needs a Claude API key. Add one in Settings, or switch to Manual.", folder: nil)
+            return
+        }
         isStarting = true
         defer { isStarting = false }
-        await controller.start(mode: .manual)
+        liveStatus = .idle
+        await controller.start(mode: mode)
         guard controller.isRecording else {
             if case let .failed(message) = controller.state {
                 Notifier.post(title: "Couldn't start recording", body: message, folder: nil)
@@ -127,6 +139,7 @@ final class AppModel {
     private func stopSession() async {
         await controller.stop()
         SystemAudio.restoreOutput()
+        liveStatus = .idle
         partialTranscript = ""
         guard case let .done(result) = controller.state, let folder = controller.lastFolder else {
             pill.hide()

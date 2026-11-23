@@ -16,7 +16,9 @@ final class RecordingPillController {
         hideTask = nil
         if panel == nil, let screen = NSScreen.main {
             let topInset = screen.safeAreaInsets.top   // notch height; 0 on displays without one
-            let size = NSSize(width: Island.width, height: topInset + Island.contentHeight)
+            // Sized for the tallest state; the island itself is drawn at its current height from the
+            // top, and the clear area below it lets clicks through.
+            let size = NSSize(width: Island.width, height: topInset + Island.maxContentHeight)
             let origin = NSPoint(x: screen.frame.midX - size.width / 2, y: screen.frame.maxY - size.height)
             let p = NSPanel(contentRect: NSRect(origin: origin, size: size), styleMask: [.borderless, .nonactivatingPanel],
                             backing: .buffered, defer: false)
@@ -69,6 +71,9 @@ private final class IslandPresence {
 private enum Island {
     static let width: CGFloat = 600
     static let contentHeight: CGFloat = 76
+    /// Extra room for the "Live: …" cost line on the done state.
+    static let extraLineHeight: CGFloat = 15
+    static let maxContentHeight = contentHeight + extraLineHeight
     static let flare: CGFloat = 10      // concave "ears" where the island meets the top edge
     static let cornerRadius: CGFloat = 22
 }
@@ -102,13 +107,21 @@ private struct IslandView: View {
     let topInset: CGFloat
     let close: () -> Void
 
+    private var contentHeight: CGFloat {
+        if case let .done(result) = model.controller.state, result.liveModel != nil {
+            return Island.contentHeight + Island.extraLineHeight
+        }
+        return Island.contentHeight
+    }
+
     var body: some View {
         IslandContent(model: model, close: close)
             .padding(.top, topInset + 8)
             .padding(.bottom, 10)
             .padding(.horizontal, Island.flare + 20)
-            .frame(width: Island.width, height: topInset + Island.contentHeight, alignment: .top)
+            .frame(width: Island.width, height: topInset + contentHeight, alignment: .top)
             .background(IslandShape(flare: Island.flare, radius: Island.cornerRadius).fill(.black))
+            .frame(maxHeight: .infinity, alignment: .top)
             .environment(\.colorScheme, .dark)
             .scaleEffect(x: presence.shown ? 1 : 0.35, y: presence.shown ? 1 : 0.1, anchor: .top)
             .opacity(presence.shown ? 1 : 0)
@@ -137,6 +150,7 @@ private struct IslandContent: View {
                         }
                         .font(.system(size: 13)).foregroundStyle(.secondary)
                         if mode != .manual { Text(mode.title).font(.system(size: 11)).foregroundStyle(.secondary) }
+                        if mode == .live { LiveStatusBadge(status: model.liveStatus) }
                     }
                     Text(model.partialTranscript.isEmpty ? "Listening… Hold ⌥ to draw." : model.partialTranscript)
                         .font(.system(size: 12)).foregroundStyle(.secondary)
@@ -167,6 +181,10 @@ private struct IslandContent: View {
                         .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
                     if result.usedAI, let usedModel = result.model {
                         Text(Pricing.summary(model: usedModel, tokens: result.tokens))
+                            .font(.system(size: 11).monospacedDigit()).foregroundStyle(.tertiary).lineLimit(1)
+                    }
+                    if let liveModel = result.liveModel {
+                        Text("Live: " + Pricing.summary(model: liveModel, tokens: result.liveTokens))
                             .font(.system(size: 11).monospacedDigit()).foregroundStyle(.tertiary).lineLimit(1)
                     }
                 }
@@ -220,6 +238,39 @@ private struct RecordingDot: View {
         Circle().fill(.red).frame(width: 9, height: 9)
             .opacity(pulse ? 0.45 : 1)
             .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: pulse)
+            .onAppear { pulse = true }
+    }
+}
+
+/// Live annotation health next to the timer: a pulsing blue dot while Claude is looking, nothing
+/// while idle or fine, and an orange dot plus "AI offline" when the last request failed.
+private struct LiveStatusBadge: View {
+    let status: LiveStatus
+    var body: some View {
+        switch status {
+        case .working:
+            PulsingDot(color: Color(cgColor: Palette.ai), size: 7)
+                .help("Claude is looking at your screen")
+        case .offline:
+            HStack(spacing: 4) {
+                Circle().fill(.orange).frame(width: 7, height: 7)
+                Text("AI offline").font(.system(size: 11)).foregroundStyle(.orange)
+            }
+            .help("The last Live request failed. Recording continues.")
+        case .idle, .ok:
+            EmptyView()
+        }
+    }
+}
+
+private struct PulsingDot: View {
+    let color: Color
+    let size: CGFloat
+    @State private var pulse = false
+    var body: some View {
+        Circle().fill(color).frame(width: size, height: size)
+            .opacity(pulse ? 0.35 : 1)
+            .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: pulse)
             .onAppear { pulse = true }
     }
 }

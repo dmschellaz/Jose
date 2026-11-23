@@ -1,9 +1,13 @@
 import Foundation
 import Observation
+import RedlineCore
 
 @MainActor @Observable
 final class AppSettings {
     static let reportModels = ["claude-sonnet-5-5", "claude-opus-5-5"]
+    static let liveModels = ["claude-haiku-5-5", "claude-sonnet-5-5"]
+    /// Modes the user can pick today. Chatty isn't built yet.
+    static let availableModes: [SessionMode] = [.manual, .live]
     private let defaults = UserDefaults.standard
 
     var outputRoot: URL {
@@ -20,6 +24,13 @@ final class AppSettings {
     var pasteForOtherComputer: Bool {
         didSet { defaults.set(pasteForOtherComputer, forKey: "pasteForOtherComputer") }
     }
+    var sessionMode: SessionMode {
+        didSet { defaults.set(sessionMode.rawValue, forKey: "sessionMode") }
+    }
+    /// The model Live mode asks after each sentence.
+    var liveModel: String {
+        didSet { defaults.set(liveModel, forKey: "liveModel") }
+    }
     private(set) var hasAPIKey: Bool
 
     init() {
@@ -29,6 +40,10 @@ final class AppSettings {
         reportModel = storedModel.flatMap { Self.reportModels.contains($0) ? $0 : nil } ?? Self.reportModels[0]
         lastSessionPath = defaults.string(forKey: "lastSessionPath")
         pasteForOtherComputer = defaults.bool(forKey: "pasteForOtherComputer")
+        let storedMode = defaults.string(forKey: "sessionMode").flatMap(SessionMode.init(rawValue:))
+        sessionMode = storedMode.flatMap { Self.availableModes.contains($0) ? $0 : nil } ?? .manual
+        let storedLive = defaults.string(forKey: "liveModel")
+        liveModel = storedLive.flatMap { Self.liveModels.contains($0) ? $0 : nil } ?? Self.liveModels[0]
         hasAPIKey = KeychainStore.load() != nil
     }
 

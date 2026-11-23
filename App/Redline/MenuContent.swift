@@ -1,3 +1,4 @@
+import RedlineCore
 import SwiftUI
 
 struct MenuContent: View {
@@ -14,7 +15,15 @@ struct MenuContent: View {
             Button(model.isFinalizing ? "Writing report…" : "Start Feedback Session") { Task { await model.toggleSession() } }
                 .disabled(model.isFinalizing)
         }
-        Text("Mode: Manual. Live & Chatty arrive in later phases.")
+        Picker("Mode", selection: Bindable(model.settings).sessionMode) {
+            ForEach(AppSettings.availableModes, id: \.self) { Text($0.title).tag($0) }
+            Text("Chatty (coming soon)").tag(SessionMode.chatty).disabled(true).selectionDisabled()
+        }
+        .pickerStyle(.inline)
+        .disabled(model.isRecording || model.isStarting || model.isFinalizing)
+        if model.settings.sessionMode == .live && !model.settings.hasAPIKey {
+            Text("Live needs a Claude API key. Add one in Settings.")
+        }
         Divider()
         Menu("Recent Sessions") {
             let recent = model.recentSessions()
