@@ -4,7 +4,7 @@ import RedlineCore
 
 @MainActor @Observable
 final class AppSettings {
-    static let reportModels = ["claude-sonnet-5-5", "claude-opus-5-5"]
+    static let reportModels = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"]
     static let liveModels = ["claude-haiku-5-5", "claude-sonnet-5-5"]
     /// Modes the user can pick today. Chatty isn't built yet.
     static let availableModes: [SessionMode] = [.manual, .live]

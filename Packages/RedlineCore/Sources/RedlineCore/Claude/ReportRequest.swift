@@ -82,7 +82,8 @@ public enum ReportRequest {
             system: systemPrompt,
             messages: [.init(role: "user", content: blocks)],
             output_config: .init(effort: "medium", format: .init(schema: schema)),
-            fallbacks: "default")
+            // Haiku has no server-side refusal fallback; asking for one is an error.
+            fallbacks: model.hasPrefix("claude-haiku") ? nil : "default")
     }
 
     /// ` (live AI marked: "Billing card", "Save button")`, or "" when the AI drew nothing.

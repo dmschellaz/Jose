@@ -21,7 +21,7 @@ struct SettingsView: View {
                     Text("Couldn't save the key to Keychain.").font(.caption).foregroundStyle(.red)
                 }
                 Picker("Report model", selection: $settings.reportModel) {
-                    ForEach(AppSettings.reportModels, id: \.self) { Text($0) }
+                    ForEach(AppSettings.reportModels, id: \.self) { Text(Pricing.displayName($0)) }
                 }
                 Text("Without a key, sessions still save screenshots and the transcript, with no AI write-up.")
                     .font(.caption).foregroundStyle(.secondary)

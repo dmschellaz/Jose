@@ -1,5 +1,8 @@
 import CoreGraphics
 import Foundation
+import os
+
+private let liveLog = Logger(subsystem: "com.dmschellaz.redline", category: "live")
 
 /// Live mode: after each finished sentence, asks the live model what the user means and draws it.
 ///
@@ -123,7 +126,13 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
 
     private func run(_ job: Job, gen: Int) async {
         guard let llm, let context else { return }
-        guard let frame = await frame((job.start + job.end) / 2), gen == generation else { return }
+        let wanted = (job.start + job.end) / 2
+        guard let frame = await frame(wanted), gen == generation else {
+            liveLog.error("No frame for sentence [\(job.start, format: .fixed(precision: 1))–\(job.end, format: .fixed(precision: 1))]; skipped")
+            return
+        }
+        saveFrame(frame, folder: context.folder)
+        let began = ContinuousClock.now
         let clicks = job.clicks.filter { $0.displayID == frame.display.id }.map(\.point)
         let request = AnnotateRequest.make(model: model, frame: frame, sentence: job.text,
                                            recentSentences: job.recent, clicks: clicks, url: job.url)
@@ -136,14 +145,25 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
             modelUsed = response.model ?? model
             guard let text = response.firstText() else { throw ClaudeError.noText }
             let marks = try AnnotateRequest.parse(text, frame: frame, createdAt: job.end)
+            let elapsed = ContinuousClock.now - began
+            liveLog.info("Sentence [\(job.start, format: .fixed(precision: 1))–\(job.end, format: .fixed(precision: 1))] frame t=\(frame.t, format: .fixed(precision: 1)) display \(frame.display.id): \(marks.count) mark(s) in \(elapsed, privacy: .public)")
+            if marks.isEmpty { liveLog.info("No marks; model said: \(String(text.prefix(400)), privacy: .public)") }
             status = .ok
             guard !marks.isEmpty else { return }
             context.emit(.aiAnnotation(sentenceID: job.sentenceID, annotations: marks, say: nil))
             onMarks?(marks)
         } catch {
             guard gen == generation else { return }
+            liveLog.error("Live request failed: \(String(describing: error), privacy: .public)")
             status = .offline
         }
+    }
+
+    /// Keeps the frame the model saw (raw/live-<ms>.jpg), so a missing or misplaced mark can be checked later.
+    private func saveFrame(_ frame: LiveFrame, folder: SessionFolder) {
+        let url = folder.rawURL.appending(path: "live-\(Int(frame.t * 1000)).jpg")
+        let data = frame.jpeg
+        Task.detached(priority: .utility) { try? data.write(to: url) }
     }
 
     /// Races the request against `timeout`; whichever finishes first wins and the other is cancelled.

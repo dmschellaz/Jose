@@ -49,3 +49,9 @@ private func headers(_ request: MessagesRequest) -> [String] {
     let item = try #require(items["items"] as? [String: Any])
     #expect(Set(item["required"] as? [String] ?? []) == ["title", "moment_ids", "where", "problem", "wanted", "quote", "image_caption"])
 }
+
+@Test func reportFallbacksSkippedForHaiku() {
+    let input = ReportInput(moments: [], images: [:], transcript: [], startURL: nil)
+    #expect(ReportRequest.make(model: "claude-haiku-5-5", input: input).fallbacks == nil)
+    #expect(ReportRequest.make(model: "claude-sonnet-5-5", input: input).fallbacks == "default")
+}
