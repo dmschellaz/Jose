@@ -9,12 +9,20 @@ private final class AudioPipe: @unchecked Sendable {
     let outFormat: AVAudioFormat
     let continuation: AsyncStream<AnalyzerInput>.Continuation
     private var loggedError = false
+    /// Audio-thread only: finds the end of each utterance so the recognizer can finalize at once.
+    private var detector = SilenceDetector()
+    /// Seconds of audio handed to the analyzer so far (its timeline starts at 0).
+    private var fedSeconds: Double = 0
+    /// Called on the audio thread with the analyzer-timeline time the speech stopped.
+    let onUtteranceEnd: @Sendable (Double) -> Void
 
-    init?(from inFormat: AVAudioFormat, to outFormat: AVAudioFormat, continuation: AsyncStream<AnalyzerInput>.Continuation) {
+    init?(from inFormat: AVAudioFormat, to outFormat: AVAudioFormat, continuation: AsyncStream<AnalyzerInput>.Continuation,
+          onUtteranceEnd: @escaping @Sendable (Double) -> Void) {
         guard let converter = AVAudioConverter(from: inFormat, to: outFormat) else { return nil }
         self.converter = converter
         self.outFormat = outFormat
         self.continuation = continuation
+        self.onUtteranceEnd = onUtteranceEnd
     }
 
     func push(_ buffer: AVAudioPCMBuffer) {
@@ -38,7 +46,14 @@ private final class AudioPipe: @unchecked Sendable {
                 NSLog("Redline: audio conversion failed: \(error)")
             }
         } else if out.frameLength > 0 {
+            let start = fedSeconds
             continuation.yield(AnalyzerInput(buffer: out))
+            fedSeconds += Double(out.frameLength) / outFormat.sampleRate
+            if let channel = buffer.floatChannelData?[0] {
+                let level = SilenceDetector.level(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
+                let duration = Double(buffer.frameLength) / buffer.format.sampleRate
+                if let end = detector.feed(level: level, at: start, duration: duration) { onUtteranceEnd(end) }
+            }
         }
     }
 }
@@ -94,7 +109,8 @@ final class SpeechService: SessionService {
                     let text = String(result.text.characters).trimmingCharacters(in: .whitespacesAndNewlines)
                     if result.isFinal {
                         self?.onPartial?("")
-                        guard !text.isEmpty else { continue }
+                        // Skip empty or punctuation-only finals (e.g. "." for a stretch of silence).
+                        guard text.unicodeScalars.contains(where: CharacterSet.alphanumerics.contains) else { continue }
                         let start = result.range.start.seconds, end = result.range.end.seconds
                         guard start.isFinite, end.isFinite else { continue }   // NaN would break JSON encoding
                         let offset = offsetBox.value
@@ -115,7 +131,11 @@ final class SpeechService: SessionService {
 
             let input = engine.inputNode
             let inFormat = input.outputFormat(forBus: 0)
-            guard let pipe = AudioPipe(from: inFormat, to: format, continuation: continuation) else {
+            // Finalize as soon as the speaker pauses: on its own the recognizer waited 4–10 s.
+            let finalizer = AnalyzerBox(analyzer)
+            guard let pipe = AudioPipe(from: inFormat, to: format, continuation: continuation, onUtteranceEnd: { end in
+                Task { await finalizer.finalize(through: end + 0.15) }
+            }) else {
                 throw SpeechServiceError.converterUnavailable
             }
             Self.installTap(on: input, format: inFormat, pipe: pipe)
@@ -156,4 +176,13 @@ final class SpeechService: SessionService {
 
 private final class OffsetBox: @unchecked Sendable {
     var value: TimeInterval = 0
+}
+
+/// Lets the audio thread ask the analyzer to finalize what has been said so far.
+private final class AnalyzerBox: Sendable {
+    let analyzer: SpeechAnalyzer
+    init(_ analyzer: SpeechAnalyzer) { self.analyzer = analyzer }
+    func finalize(through seconds: Double) async {
+        try? await analyzer.finalize(through: CMTime(seconds: seconds, preferredTimescale: 600))
+    }
 }
