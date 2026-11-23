@@ -13,6 +13,9 @@ private let liveLog = Logger(subsystem: "com.dmschellaz.redline", category: "liv
 public final class LiveAnnotator: SessionService, TimelineObserving, TokenReporting {
     /// Called with each non-empty batch of AI marks (global points), on the main actor.
     public var onMarks: (([Annotation]) -> Void)?
+    /// Called once for every sentence the annotator took: with the frame the model saw and its marks (empty
+    /// when it marked nothing or failed), or with a nil frame when the sentence was skipped. Main actor.
+    public var onResult: ((_ sentenceID: UUID, _ frame: LiveFrame?, _ marks: [Annotation]) -> Void)?
     /// Called whenever `status` changes.
     public var onStatus: ((LiveStatus) -> Void)?
 
@@ -90,7 +93,12 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
             recent.append(text)
             if recent.count > Self.contextSentences { recent.removeFirst(recent.count - Self.contextSentences) }
             clicks = []
-            if inFlight == nil { send(job) } else { queued = job }
+            if inFlight == nil {
+                send(job)
+            } else {
+                if let skipped = queued { onResult?(skipped.sentenceID, nil, []) }   // newest wins
+                queued = job
+            }
         case let .click(point, displayID, _):
             clicks.append((point, displayID))
         case let .urlChanged(url, _, _):
@@ -126,12 +134,16 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
 
     private func run(_ job: Job, gen: Int) async {
         guard let llm, let context else { return }
+        var seenFrame: LiveFrame?
+        var seenMarks: [Annotation] = []
+        defer { if gen == generation { onResult?(job.sentenceID, seenFrame, seenMarks) } }
         let wanted = (job.start + job.end) / 2
         guard let frame = await frame(wanted), gen == generation else {
             liveLog.error("No frame for sentence [\(job.start, format: .fixed(precision: 1))–\(job.end, format: .fixed(precision: 1))]; skipped")
             return
         }
         saveFrame(frame, folder: context.folder)
+        seenFrame = frame
         let began = ContinuousClock.now
         let clicks = job.clicks.filter { $0.displayID == frame.display.id }.map(\.point)
         let request = AnnotateRequest.make(model: model, frame: frame, sentence: job.text,
@@ -149,6 +161,7 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
             liveLog.info("Sentence [\(job.start, format: .fixed(precision: 1))–\(job.end, format: .fixed(precision: 1))] frame t=\(frame.t, format: .fixed(precision: 1)) display \(frame.display.id): \(marks.count) mark(s) in \(elapsed, privacy: .public)")
             if marks.isEmpty { liveLog.info("No marks; model said: \(String(text.prefix(400)), privacy: .public)") }
             status = .ok
+            seenMarks = marks
             guard !marks.isEmpty else { return }
             context.emit(.aiAnnotation(sentenceID: job.sentenceID, annotations: marks, say: nil))
             onMarks?(marks)

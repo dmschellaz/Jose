@@ -45,6 +45,9 @@ public final class SessionController {
         case idle
         case recording(mode: SessionMode, startedAt: Date)
         case finalizing
+        /// Recording has stopped and the session is saved; the report waits for `writeReport(including:)`.
+        /// Only used when `holdReportForReview` is on.
+        case reviewing
         case done(ReportResult)
         case failed(String)
     }
@@ -61,6 +64,9 @@ public final class SessionController {
     @ObservationIgnored private let now: @Sendable () -> Date
     @ObservationIgnored private let tickInterval: Duration
     @ObservationIgnored private let clickDelay: Duration
+    /// When true, `stop()` ends in `.reviewing` instead of writing the report straight away.
+    @ObservationIgnored public var holdReportForReview = false
+    @ObservationIgnored private var liveUsage: (tokens: TokenUsage, model: String?) = (TokenUsage(), nil)
 
     @ObservationIgnored private var events: [TimelineEvent] = []
     @ObservationIgnored private var metadata: SessionMetadata?
@@ -97,7 +103,7 @@ public final class SessionController {
 
     public func start(mode: SessionMode) async {
         switch state {
-        case .recording, .finalizing: return
+        case .recording, .finalizing, .reviewing: return
         default: break
         }
         guard !starting else { return }
@@ -225,16 +231,47 @@ public final class SessionController {
         self.folder = folder
         self.currentFolder = folder
         self.metadata = metadata
-        persist()
-
-        var result = await reportBuilder().build(document: document(), folder: folder)
-        result.liveTokens = reporters.reduce(TokenUsage()) { $0 + $1.tokensUsed }
-        result.liveModel = reporters.lazy.compactMap(\.modelUsed).first
-        self.metadata?.tokens = result.tokens + result.liveTokens
+        liveUsage = (reporters.reduce(TokenUsage()) { $0 + $1.tokensUsed }, reporters.lazy.compactMap(\.modelUsed).first)
+        self.metadata?.tokens = liveUsage.tokens
         persist()
         lastFolder = folder
+
+        if holdReportForReview {
+            state = .reviewing
+            return
+        }
+        await writeReport(including: nil)
+    }
+
+    /// Writes the report for a stopped session. `including` limits it to those sentences (and the AI marks
+    /// made for them); nil means all. session.json always keeps the full timeline.
+    public func writeReport(including sentenceIDs: Set<UUID>?) async {
+        guard state == .reviewing || state == .finalizing, let folder, metadata != nil else { return }
+        state = .finalizing
+        var doc = document()
+        if let ids = sentenceIDs {
+            doc.events = doc.events.filter { e in
+                switch e {
+                case let .sentence(id, _, _, _): return ids.contains(id)
+                case let .aiAnnotation(id, _, _): return ids.contains(id)
+                default: return true
+                }
+            }
+        }
+        var result = await reportBuilder().build(document: doc, folder: folder)
+        result.liveTokens = liveUsage.tokens
+        result.liveModel = liveUsage.model
+        self.metadata?.tokens = result.tokens + result.liveTokens
+        persist()
         reset()
         state = .done(result)
+    }
+
+    /// Leaves review without writing a report. The session stays on disk; "Regenerate" can still report it.
+    public func endReview() {
+        guard state == .reviewing else { return }
+        reset()
+        state = .idle
     }
 
     public func cancel() async {
@@ -262,6 +299,7 @@ public final class SessionController {
               let event = await capture.captureKeyframe(reason: reason),
               gen == generation, isRecording else { return }
         events.append(event)
+        for service in started { (service as? any TimelineObserving)?.observe(event) }
     }
 
     private func stopStarted() async {

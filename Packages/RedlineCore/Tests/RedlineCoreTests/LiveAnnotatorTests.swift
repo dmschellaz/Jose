@@ -46,6 +46,7 @@ actor GatedLLM: LLMClient {
     var events: [TimelineEvent] = []
     var marks: [[Annotation]] = []
     var statuses: [LiveStatus] = []
+    var results: [(id: UUID, hadFrame: Bool, marks: Int)] = []
 }
 
 @MainActor private func makeAnnotator(_ llm: (any LLMClient)?, model: String = "claude-haiku-5-5",
@@ -55,6 +56,7 @@ actor GatedLLM: LLMClient {
     let a = LiveAnnotator(llm: llm, model: model, frame: { liveTestFrame(t: $0) }, timeout: timeout)
     a.onMarks = { sink.marks.append($0) }
     a.onStatus = { sink.statuses.append($0) }
+    a.onResult = { id, frame, marks in sink.results.append((id, frame != nil, marks.count)) }
     let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
     let folder = try SessionFolder.create(root: root, slug: "live", date: Date())
     let ctx = SessionContext(folder: folder, clock: SessionClock(startedAt: Date()), mode: mode,
@@ -106,6 +108,23 @@ private func sentence(_ text: String, at t: Double) -> TimelineEvent {
         let last = try #require(await llm.sentence(1))
         #expect(last.contains("Reviewer just said: third"))
         #expect(last.contains("- first") && last.contains("- second"))   // skipped sentences still give context
+    }
+
+    @Test func everySentenceGetsOneResult() async throws {
+        let llm = GatedLLM()
+        let (a, sink) = try await makeAnnotator(llm, timeout: .milliseconds(200))
+        let first = UUID(), second = UUID(), third = UUID()
+        a.observe(.sentence(id: first, text: "first", start: 0, end: 1))
+        await waitUntil { await llm.count == 1 }
+        a.observe(.sentence(id: second, text: "second", start: 2, end: 3))
+        a.observe(.sentence(id: third, text: "third", start: 4, end: 5))
+        #expect(sink.results.map(\.id) == [second])          // replaced in the queue: skipped, no frame
+        #expect(sink.results.first?.hadFrame == false)
+        await llm.release(0)
+        await waitUntil { sink.results.count == 2 }
+        #expect(sink.results[1].id == first && sink.results[1].hadFrame && sink.results[1].marks == 1)
+        await waitUntil { sink.results.count == 3 }       // third times out
+        #expect(sink.results[2].id == third && sink.results[2].hadFrame && sink.results[2].marks == 0)
     }
 
     @Test func timeoutGoesOfflineAndEmitsNothing() async throws {
