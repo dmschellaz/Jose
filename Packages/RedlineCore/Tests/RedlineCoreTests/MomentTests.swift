@@ -55,3 +55,46 @@ private func mark(_ t: Double) -> Annotation {
 @Test func emptyTimelineHasNoMoments() {
     #expect(MomentSegmenter.segment([kf(1, "a.png")]).isEmpty)
 }
+
+private func aiMark(_ t: Double, _ caption: String? = "Save button") -> Annotation {
+    Annotation(shape: .rect(CGRect(x: 0, y: 0, width: 10, height: 10)), caption: caption, author: .ai, createdAt: t, displayID: 1)
+}
+
+@Test func aiMarksAttachToTheirSentencesMoment() {
+    let first = UUID()
+    // The AI answered the first sentence late (t = 9.5), nearer to moment 2 by time.
+    let m = MomentSegmenter.segment([
+        .sentence(id: first, text: "a", start: 0, end: 2),
+        .sentence(id: UUID(), text: "b", start: 10, end: 12),
+        .aiAnnotation(sentenceID: first, annotations: [aiMark(9.5)], say: nil),
+    ])
+    #expect(m[0].aiMarks.count == 1)
+    #expect(m[1].aiMarks.isEmpty)
+}
+
+@Test func aiMarksWithUnknownSentenceFallBackToNearest() {
+    let m = MomentSegmenter.segment([
+        s("a", 0, 2), s("b", 10, 12),
+        .aiAnnotation(sentenceID: UUID(), annotations: [aiMark(11), aiMark(11.5)], say: nil),
+    ])
+    #expect(m[0].aiMarks.isEmpty)
+    #expect(m[1].aiMarks.count == 2)
+}
+
+@Test func keyframeAnchorPrefersUserMarksThenAIMarksThenClicks() {
+    var m = Moment(id: 1, start: 0, end: 10, sentences: [])
+    #expect(KeyframeSelector.anchorTime(for: m) == 5)
+    m.clickTimes = [2]
+    #expect(KeyframeSelector.anchorTime(for: m) == 2.3)
+    m.aiMarks = [aiMark(7), aiMark(9)]
+    #expect(KeyframeSelector.anchorTime(for: m) == 9)
+    m.userMarks = [mark(3), mark(4)]
+    // A later AI mark doesn't pull the keyframe away from the reviewer's own mark.
+    #expect(KeyframeSelector.anchorTime(for: m) == 4)
+
+    let seg = MomentSegmenter.segment([
+        s("a", 0, 10), .userMark(mark(3)), kf(3.1, "user.png"), kf(9, "ai.png"),
+        .aiAnnotation(sentenceID: UUID(), annotations: [aiMark(9)], say: nil),
+    ])
+    #expect(seg[0].keyframe?.file == "user.png")
+}

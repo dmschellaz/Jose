@@ -81,10 +81,11 @@ public enum MomentSegmenter {
             case let .userMark(a):
                 let i = nearest(a.createdAt)
                 moments[i].userMarks.append(a)
-            case let .aiAnnotation(_, anns, _):
+            case let .aiAnnotation(sentenceID, anns, _):
+                // The AI answers one sentence; its marks belong to that sentence's moment.
+                let owner = moments.firstIndex { $0.sentences.contains { $0.id == sentenceID } }
                 for a in anns {
-                    let i = nearest(a.createdAt)
-                    moments[i].aiMarks.append(a)
+                    moments[owner ?? nearest(a.createdAt)].aiMarks.append(a)
                 }
             case let .click(_, _, t):
                 let i = nearest(t)
@@ -111,8 +112,10 @@ public enum MomentSegmenter {
 }
 
 public enum KeyframeSelector {
+    /// The reviewer's own marks win over the live AI's guesses, which win over clicks.
     public static func anchorTime(for m: Moment) -> Double {
-        if let t = (m.userMarks + m.aiMarks).map(\.createdAt).max() { return t }
+        if let t = m.userMarks.map(\.createdAt).max() { return t }
+        if let t = m.aiMarks.map(\.createdAt).max() { return t }
         if let t = m.clickTimes.max() { return t + 0.3 }
         return (m.start + m.end) / 2
     }
