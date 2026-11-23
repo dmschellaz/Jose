@@ -21,9 +21,14 @@ final class AppModel {
     @ObservationIgnored private let pill = RecordingPillController()
     @ObservationIgnored private let onboarding = OnboardingWindowController()
     let paste = PasteSequencer()
+    /// The island's running list of sentences and screenshots; reviewed after stop.
+    let feed = SessionFeed()
 
     var isRecording: Bool { controller.isRecording }
     var isFinalizing: Bool { controller.state == .finalizing }
+    var isReviewing: Bool { controller.state == .reviewing }
+    /// Ready for the next point: not mid-sentence and nothing waiting for the live AI.
+    var isReady: Bool { partialTranscript.isEmpty && !feed.isWaiting }
     var lastSessionFolder: URL? { settings.lastSessionPath.map { URL(fileURLWithPath: $0) } }
 
     init() {
@@ -31,13 +36,15 @@ final class AppModel {
         live = LiveAnnotator(llm: nil, model: settings.liveModel, frame: { [capture] t in await capture.liveFrame(near: t) })
         controller = SessionController(
             capture: capture,
-            services: [overlay, context, speech, live],   // stop order is reversed: live, then speech flushes
+            services: [overlay, context, speech, live, feed],   // stop order is reversed: live, then speech flushes
             outputRoot: { settings.outputRoot },
             reportBuilder: { Self.makeReportBuilder(settings) })
+        controller.holdReportForReview = true   // the island lists the sentences; the user picks, then copies
         context.onPen = { [overlay] in overlay.setPen($0) }
         speech.onPartial = { [weak self] in self?.partialTranscript = $0 }
         live.onMarks = { [overlay] marks in for m in marks { overlay.display(m, lifetime: 6) } }
         live.onStatus = { [weak self] in self?.setLiveStatus($0) }
+        live.onResult = { [feed] id, frame, marks in feed.liveResult(sentenceID: id, frame: frame, marks: marks) }
         paste.onFinished = { [pill] in pill.hide(after: .seconds(2)) }
     }
 
@@ -57,6 +64,7 @@ final class AppModel {
         guard !isStarting else { return }
         switch controller.state {
         case .recording: await stopSession()
+        case .reviewing: await copySelected()
         case .finalizing: return
         default: await startSession()
         }
@@ -125,6 +133,7 @@ final class AppModel {
         isStarting = true
         defer { isStarting = false }
         liveStatus = .idle
+        feed.expectsLiveResults = mode == .live
         live.configure(llm: mode == .manual ? nil : settings.apiKey().map { ClaudeHTTPClient(apiKey: $0) }, model: settings.liveModel)
         await controller.start(mode: mode)
         guard controller.isRecording else {
@@ -146,15 +155,36 @@ final class AppModel {
         SystemAudio.restoreOutput()
         liveStatus = .idle
         partialTranscript = ""
+        guard controller.state == .reviewing, let folder = controller.lastFolder else {
+            pill.hide()
+            return
+        }
+        // The island now lists the sentences for review; the report is written when the user copies.
+        settings.lastSessionPath = folder.url.path
+        feed.finish(folder: folder)
+    }
+
+    /// Writes the report from the sentences ticked in the island and copies it.
+    func copySelected() async {
+        guard controller.state == .reviewing else { return }
+        let ids = feed.includedIDs
+        let all = ids.count == feed.entries.count
+        await controller.writeReport(including: all ? nil : Set(ids))
         guard case let .done(result) = controller.state, let folder = controller.lastFolder else {
             pill.hide()
             return
         }
         handOff(result, folder: folder)
         // The island stays up as the "Feedback ready" confirmation; banners are easy to miss. In paste
-        // mode it holds the Copy Screenshots button, so it stays until closed.
+        // mode it holds the paste-twice progress, so it stays until closed.
         NSSound(named: "Glass")?.play()
         if !settings.pasteForOtherComputer { pill.hide(after: .seconds(10)) }
+    }
+
+    /// Closes the review without writing a report; the session stays on disk for "Regenerate".
+    func closeReview() {
+        controller.endReview()
+        pill.hide()
     }
 
     /// Starts the "paste twice" hand-off for a Claude chat on another computer: the write-up text is

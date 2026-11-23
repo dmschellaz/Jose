@@ -9,6 +9,9 @@ struct MenuContent: View {
             Button("Stop & Write Report") { Task { await model.toggleSession() } }
             Button("Mark Moment") { model.markMoment() }
             Button("Cancel Session") { Task { await model.cancel() } }
+        } else if model.isReviewing {
+            Button("Copy Selected to Clipboard") { Task { await model.copySelected() } }
+            Button("Close Review") { model.closeReview() }
         } else if model.isStarting {
             Button("Starting…") {}.disabled(true)
         } else {
@@ -20,7 +23,7 @@ struct MenuContent: View {
             Text("Chatty (coming soon)").tag(SessionMode.chatty).disabled(true).selectionDisabled()
         }
         .pickerStyle(.inline)
-        .disabled(model.isRecording || model.isStarting || model.isFinalizing)
+        .disabled(model.isRecording || model.isStarting || model.isFinalizing || model.isReviewing)
         if model.settings.sessionMode == .live && !model.settings.hasAPIKey {
             Text("Live needs a Claude API key. Add one in Settings.")
         }
@@ -37,7 +40,7 @@ struct MenuContent: View {
         Button("Copy Last Screenshots Only") { if let f = model.lastSessionFolder { model.copyScreenshots(folder: f) } }
             .disabled(model.lastSessionFolder == nil)
         Button("Regenerate Last Report") { Task { await model.regenerateLast() } }
-            .disabled(model.lastSessionFolder == nil || model.isRecording || model.isStarting || model.isFinalizing)
+            .disabled(model.lastSessionFolder == nil || model.isRecording || model.isStarting || model.isFinalizing || model.isReviewing)
         Divider()
         Button("Permissions…") { model.showOnboarding() }
         SettingsLink { Text("Settings…") }.keyboardShortcut(",")
