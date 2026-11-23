@@ -5,28 +5,31 @@ import Foundation
 public enum AnnotateRequest {
     /// At most this many marks are kept from one answer.
     public static let maxMarks = 3
-    /// Marks smaller than this (in image pixels) are dropped as degenerate.
-    static let minExtent: Double = 2
+    /// Boxes thinner than this (image pixels) are widened to it around their centre, so a point or a
+    /// one-line answer still makes a visible mark.
+    static let minBox: Double = 16
+    /// How far an arrow's tail starts from its tip, in image pixels.
+    static let arrowLength = CGSize(width: 70, height: 40)
 
     public static let systemPrompt = """
     You watch a reviewer talk through an app on their screen. After each sentence they say, you get a \
     screenshot of their display and you mark what the reviewer is referring to, so they can see you understood.
 
-    - Mark what the user is referring to. Prefer one shape; use two or three only if they clearly point at \
-    several things.
-    - Coordinates are in the screenshot's pixel space: origin top-left, x right, y down.
-    - shape "circle": x, y is the center and w is the diameter.
-    - shape "rect" or "highlight": x, y is the top-left corner, w and h the size. Use highlight for text.
-    - shape "arrow": from x, y to x2, y2, pointing at the thing.
-    - Set every unused number to 0.
+    - Find the thing on screen the reviewer means and give its bounding box: x, y is its top-left corner and \
+    w, h its size, in the screenshot's pixel space (origin top-left, x right, y down). Fit the box tightly \
+    around the element (the card, button, column or text), and always give real values: w and h are never 0.
+    - The mouse pointer is visible in the screenshot. Reviewers usually rest it on what they are talking about, \
+    so use it with their words. Their recent clicks are given in the same pixel space.
+    - shape says how to draw the mark around that box: "circle" for a small thing or a single value, "rect" for \
+    a card, panel or area, "highlight" for a line of text, "arrow" to point at something small or easily missed.
+    - Prefer one mark; use two or three only if they clearly point at several things.
     - caption: at most 8 words naming what you marked.
-    - The reviewer's recent clicks are given in the same pixel space; they often point at the subject.
     - If the sentence doesn't refer to anything on screen (thinking aloud, "ok, next"), return no marks.
     """
 
     public static let schema: JSONValue = {
         func num() -> JSONValue { .object(["type": .string("number")]) }
-        let keys = ["shape", "x", "y", "w", "h", "x2", "y2", "caption"]
+        let keys = ["shape", "x", "y", "w", "h", "caption"]
         let mark: JSONValue = .object([
             "type": .string("object"),
             "properties": .object([
@@ -34,7 +37,7 @@ public enum AnnotateRequest {
                     "type": .string("string"),
                     "enum": .array(["circle", "rect", "arrow", "highlight"].map(JSONValue.string)),
                 ]),
-                "x": num(), "y": num(), "w": num(), "h": num(), "x2": num(), "y2": num(),
+                "x": num(), "y": num(), "w": num(), "h": num(),
                 "caption": .object(["type": .string("string")]),
             ]),
             "required": .array(keys.map(JSONValue.string)),
@@ -80,13 +83,14 @@ public enum AnnotateRequest {
 
     private struct Mark: Decodable {
         var shape: String
-        var x, y, w, h, x2, y2: Double
+        var x, y, w, h: Double
         var caption: String
     }
     private struct Envelope: Decodable { var marks: [Mark] }
 
-    /// Converts the model's answer (image pixels) into AI annotations in global points.
-    /// Marks are clamped to the image; degenerate or unknown ones are dropped; at most `maxMarks` are kept.
+    /// Converts the model's answer (bounding boxes in image pixels) into AI annotations in global points.
+    /// A box with no position at all is dropped; a too-thin one is widened; everything is clamped to the image.
+    /// At most `maxMarks` are kept.
     public static func parse(_ text: String, frame: LiveFrame, createdAt: Double) throws -> [Annotation] {
         let envelope: Envelope
         do {
@@ -104,9 +108,7 @@ public enum AnnotateRequest {
         func clamp(_ p: CGPoint) -> CGPoint {
             CGPoint(x: min(max(p.x, 0), size.width), y: min(max(p.y, 0), size.height))
         }
-        func clampedRect(_ m: Mark) -> CGRect? {
-            let r = CGRect(x: m.x, y: m.y, width: m.w, height: m.h).standardized.intersection(bounds)
-            guard !r.isNull, r.width >= minExtent, r.height >= minExtent else { return nil }
+        func globalRect(_ r: CGRect) -> CGRect {
             let a = global(CGPoint(x: r.minX, y: r.minY)), b = global(CGPoint(x: r.maxX, y: r.maxY))
             return CGRect(x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y)
         }
@@ -115,24 +117,28 @@ public enum AnnotateRequest {
 
         var out: [Annotation] = []
         for m in envelope.marks {
-            guard [m.x, m.y, m.w, m.h, m.x2, m.y2].allSatisfy(\.isFinite) else { continue }
+            guard [m.x, m.y, m.w, m.h].allSatisfy(\.isFinite), !(m.x == 0 && m.y == 0 && m.w == 0 && m.h == 0) else { continue }
+            var box = CGRect(x: m.x, y: m.y, width: m.w, height: m.h).standardized
+            box = box.insetBy(dx: -max(0, minBox - box.width) / 2, dy: -max(0, minBox - box.height) / 2)
+            box = box.intersection(bounds)
+            guard !box.isNull, box.width >= 1, box.height >= 1 else { continue }
+
             let shape: AnnotationShape
             switch m.shape {
             case "circle":
-                let c = clamp(CGPoint(x: m.x, y: m.y))
-                let radius = abs(m.w) / 2
-                guard radius * 2 >= minExtent else { continue }
-                shape = .circle(center: global(c), radius: radius * pointsPerPixel)
+                let radius = max(box.width, box.height) / 2 * 1.15 + 4
+                shape = .circle(center: global(CGPoint(x: box.midX, y: box.midY)), radius: radius * pointsPerPixel)
             case "rect":
-                guard let r = clampedRect(m) else { continue }
-                shape = .rect(r)
+                shape = .rect(globalRect(box.insetBy(dx: -4, dy: -4).intersection(bounds)))
             case "highlight":
-                guard let r = clampedRect(m) else { continue }
-                shape = .highlight(r)
+                shape = .highlight(globalRect(box))
             case "arrow":
-                let a = clamp(CGPoint(x: m.x, y: m.y)), b = clamp(CGPoint(x: m.x2, y: m.y2))
-                guard hypot(b.x - a.x, b.y - a.y) >= minExtent else { continue }
-                shape = .arrow(from: global(a), to: global(b))
+                // Points at the box's left edge from up-left, or from the right when there's no room.
+                let fromLeft = box.minX - 4 - arrowLength.width >= 0
+                let tip = CGPoint(x: fromLeft ? box.minX - 4 : box.maxX + 4, y: box.midY)
+                let tail = CGPoint(x: tip.x + (fromLeft ? -arrowLength.width : arrowLength.width),
+                                   y: tip.y - arrowLength.height)
+                shape = .arrow(from: global(clamp(tail)), to: global(clamp(tip)))
             default:
                 continue
             }

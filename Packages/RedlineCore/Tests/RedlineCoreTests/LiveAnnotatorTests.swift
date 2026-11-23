@@ -12,7 +12,7 @@ actor GatedLLM: LLMClient {
     private let served: String?
     private let autoRelease: Bool
 
-    init(answer: String = #"{"marks":[{"shape":"rect","x":10,"y":10,"w":100,"h":50,"x2":0,"y2":0,"caption":"Save"}]}"#,
+    init(answer: String = #"{"marks":[{"shape":"rect","x":10,"y":10,"w":100,"h":50,"caption":"Save"}]}"#,
          usage: (Int, Int) = (100, 10), served: String? = nil, autoRelease: Bool = false) {
         self.answer = answer
         self.usage = usage

@@ -60,53 +60,72 @@ private func near(_ a: CGRect, _ b: CGRect) -> Bool {
         #expect(mark["additionalProperties"] == .bool(false))
         #expect(root["additionalProperties"] == .bool(false))
         #expect(Set(required.compactMap { if case let .string(s) = $0 { s } else { nil } }) == Set(markProps.keys))
-        #expect(markProps.count == 8)
+        #expect(markProps.count == 6)
     }
 
-    @Test func parseMapsEveryShapeOnNonOriginDisplay() throws {
+    // liveTestFrame: 1280×640 px over a 1000×500 pt display at (-1000, 200), so 1.28 px per point.
+    @Test func parseDrawsEveryShapeAroundTheBox() throws {
         let text = """
         {"marks":[
-          {"shape":"circle","x":640,"y":320,"w":128,"h":0,"x2":0,"y2":0,"caption":" Save button "},
-          {"shape":"rect","x":128,"y":64,"w":256,"h":128,"x2":0,"y2":0,"caption":"Header"},
-          {"shape":"arrow","x":0,"y":0,"x2":1280,"y2":640,"w":0,"h":0,"caption":""}
+          {"shape":"circle","x":576,"y":256,"w":128,"h":128,"caption":" Save button "},
+          {"shape":"rect","x":128,"y":64,"w":256,"h":128,"caption":"Header"},
+          {"shape":"highlight","x":128,"y":64,"w":256,"h":0,"caption":"Title text"},
+          {"shape":"arrow","x":640,"y":320,"w":64,"h":32,"caption":""}
         ]}
         """
         let marks = try AnnotateRequest.parse(text, frame: liveTestFrame(), createdAt: 4.5)
-        #expect(marks.count == 3)
+        #expect(marks.count == 3)   // capped at maxMarks
         #expect(marks.allSatisfy { $0.author == .ai && $0.displayID == 7 && $0.createdAt == 4.5 })
         guard case let .circle(c, r) = marks[0].shape else { Issue.record("not circle"); return }
         #expect(near(c, CGPoint(x: -500, y: 450)))
-        #expect(abs(r - 50) < 0.001)   // 64 px radius / 1.28
+        #expect(abs(r - (64 * 1.15 + 4) / 1.28) < 0.001)
         #expect(marks[0].caption == "Save button")
         guard case let .rect(rect) = marks[1].shape else { Issue.record("not rect"); return }
-        #expect(near(rect, CGRect(x: -900, y: 250, width: 200, height: 100)))
-        guard case let .arrow(from, to) = marks[2].shape else { Issue.record("not arrow"); return }
-        #expect(near(from, CGPoint(x: -1000, y: 200)) && near(to, CGPoint(x: 0, y: 700)))
-        #expect(marks[2].caption == nil)
+        #expect(near(rect, CGRect(x: -1000 + 124 / 1.28, y: 200 + 60 / 1.28, width: 264 / 1.28, height: 136 / 1.28)))
+        // A zero-height highlight is widened to 16 px around its line instead of being dropped.
+        guard case let .highlight(h) = marks[2].shape else { Issue.record("not highlight"); return }
+        #expect(near(h, CGRect(x: -900, y: 200 + 56 / 1.28, width: 200, height: 12.5)))
     }
 
-    @Test func parseClampsToImageAndDropsDegenerate() throws {
+    @Test func arrowPointsAtTheBoxFromOutside() throws {
         let text = """
         {"marks":[
-          {"shape":"highlight","x":1200,"y":-40,"w":200,"h":104,"x2":0,"y2":0,"caption":"off edge"},
-          {"shape":"rect","x":2000,"y":10,"w":50,"h":50,"x2":0,"y2":0,"caption":"outside"},
-          {"shape":"circle","x":10,"y":10,"w":0,"h":0,"x2":0,"y2":0,"caption":"dot"},
-          {"shape":"arrow","x":5,"y":5,"x2":5,"y2":5,"w":0,"h":0,"caption":"nowhere"},
-          {"shape":"star","x":5,"y":5,"x2":5,"y2":5,"w":10,"h":10,"caption":"unknown"},
-          {"shape":"circle","x":-100,"y":9999,"w":64,"h":0,"x2":0,"y2":0,"caption":"corner"}
+          {"shape":"arrow","x":640,"y":320,"w":64,"h":32,"caption":"Save"},
+          {"shape":"arrow","x":20,"y":320,"w":64,"h":32,"caption":"Edge"}
+        ]}
+        """
+        let marks = try AnnotateRequest.parse(text, frame: liveTestFrame(), createdAt: 0)
+        guard case let .arrow(from, to) = marks[0].shape, case let .arrow(from2, to2) = marks[1].shape else {
+            Issue.record("not arrows"); return
+        }
+        #expect(near(to, CGPoint(x: -1000 + 636 / 1.28, y: 200 + 336 / 1.28)))
+        #expect(near(from, CGPoint(x: -1000 + 566 / 1.28, y: 200 + 296 / 1.28)))
+        // No room on the left: it comes from the right instead.
+        #expect(near(to2, CGPoint(x: -1000 + 88 / 1.28, y: 200 + 336 / 1.28)))
+        #expect(from2.x > to2.x)
+    }
+
+    @Test func parseClampsToImageAndDropsBoxesWithNoPosition() throws {
+        let text = """
+        {"marks":[
+          {"shape":"highlight","x":1200,"y":-40,"w":200,"h":104,"caption":"off edge"},
+          {"shape":"rect","x":2000,"y":10,"w":50,"h":50,"caption":"outside"},
+          {"shape":"circle","x":0,"y":0,"w":0,"h":0,"caption":"nowhere"},
+          {"shape":"star","x":5,"y":5,"w":10,"h":10,"caption":"unknown"},
+          {"shape":"circle","x":10,"y":10,"w":0,"h":0,"caption":"dot"}
         ]}
         """
         let marks = try AnnotateRequest.parse(text, frame: liveTestFrame(), createdAt: 1)
-        #expect(marks.map(\.caption) == ["off edge", "corner"])
+        #expect(marks.map(\.caption) == ["off edge", "dot"])
         guard case let .highlight(r) = marks[0].shape else { Issue.record("not highlight"); return }
         // Clamped to x 1200…1280, y 0…64 px → 62.5 x 50 pt at the display's top-right.
         #expect(near(r, CGRect(x: -62.5, y: 200, width: 62.5, height: 50)))
         guard case let .circle(c, _) = marks[1].shape else { Issue.record("not circle"); return }
-        #expect(near(c, CGPoint(x: -1000, y: 700)))
+        #expect(near(c, CGPoint(x: -1000 + 10 / 1.28, y: 200 + 10 / 1.28)))
     }
 
     @Test func parseCapsAtThreeMarks() throws {
-        let one = #"{"shape":"rect","x":10,"y":10,"w":20,"h":20,"x2":0,"y2":0,"caption":"a"}"#
+        let one = #"{"shape":"rect","x":10,"y":10,"w":20,"h":20,"caption":"a"}"#
         let text = #"{"marks":["# + Array(repeating: one, count: 5).joined(separator: ",") + "]}"
         #expect(try AnnotateRequest.parse(text, frame: liveTestFrame(), createdAt: 0).count == 3)
     }
