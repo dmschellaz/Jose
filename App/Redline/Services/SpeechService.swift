@@ -56,11 +56,6 @@ enum SpeechServiceError: LocalizedError {
 @MainActor
 final class SpeechService: SessionService {
     var onPartial: (@MainActor (String) -> Void)?
-    /// The live (volatile) transcript stopped changing for `settleDelay`: text and its time range in
-    /// session seconds. Live mode annotates from this instead of waiting 1–4 s for the final result.
-    var onSettled: (@MainActor (String, Double, Double) -> Void)?
-    static let settleDelay: Duration = .milliseconds(700)
-    private var settleTask: Task<Void, Never>?
 
     private let engine = AVAudioEngine()
     private var analyzer: SpeechAnalyzer?
@@ -98,7 +93,6 @@ final class SpeechService: SessionService {
                 for try await result in transcriber.results {
                     let text = String(result.text.characters).trimmingCharacters(in: .whitespacesAndNewlines)
                     if result.isFinal {
-                        self?.settleTask?.cancel()
                         self?.onPartial?("")
                         guard !text.isEmpty else { continue }
                         let start = result.range.start.seconds, end = result.range.end.seconds
@@ -109,15 +103,6 @@ final class SpeechService: SessionService {
                                        end: offset + end))
                     } else {
                         self?.onPartial?(text)
-                        let offset = offsetBox.value
-                        let start = result.range.start.seconds, end = result.range.end.seconds
-                        self?.settleTask?.cancel()
-                        guard !text.isEmpty, start.isFinite, end.isFinite else { continue }
-                        self?.settleTask = Task { [weak self] in
-                            try? await Task.sleep(for: Self.settleDelay)
-                            guard !Task.isCancelled else { return }
-                            self?.onSettled?(text, offset + start, offset + end)
-                        }
                     }
                 }
             } catch {
@@ -151,7 +136,6 @@ final class SpeechService: SessionService {
     }
 
     func stop() async {
-        settleTask?.cancel()
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         continuation?.finish()

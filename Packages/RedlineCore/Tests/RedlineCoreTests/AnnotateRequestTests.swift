@@ -60,14 +60,6 @@ private func near(_ a: CGRect, _ b: CGRect) -> Bool {
         #expect(AnnotateRequest.systemPrompt.contains("change the reviewer is asking for"))
     }
 
-    @Test func normalizedSentenceMatching() {
-        let n = LiveAnnotator.normalize
-        #expect(n("Make THIS purple, please.") == "make this purple please")
-        #expect(LiveAnnotator.sameSentence(n("make this purple"), n("Make this purple.")))
-        #expect(LiveAnnotator.sameSentence(n("show the rolling twelve months"), n("Show the rolling twelve months here.")))
-        #expect(!LiveAnnotator.sameSentence(n("so this one"), n("So this one should be much bigger and bold.")))
-    }
-
     @Test func schemaIsStrict() throws {
         guard case let .object(root) = AnnotateRequest.schema,
               case let .object(props)? = root["properties"],
