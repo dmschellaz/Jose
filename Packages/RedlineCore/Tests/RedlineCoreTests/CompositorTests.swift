@@ -68,9 +68,25 @@ private func aiBox(_ r: CGRect, caption: String?) -> Annotation {
     Annotation(shape: .rect(r), caption: caption, author: .ai, createdAt: 0, displayID: 1)
 }
 
-private func isDark(_ p: (r: UInt8, g: UInt8, b: UInt8)) -> Bool { p.r < 60 && p.g < 60 && p.b < 60 }
+/// AI blue: strongly blue, little red.
+private func isBlue(_ p: (r: UInt8, g: UInt8, b: UInt8)) -> Bool { p.b > 180 && p.r < 120 }
+private func isWhite(_ p: (r: UInt8, g: UInt8, b: UInt8)) -> Bool { p.r > 240 && p.g > 240 && p.b > 240 }
 
-@Test func captionedAIMarkDrawsALabelBelowTheShape() throws {
+private func blackImage(_ w: Int, _ h: Int) -> CGImage {
+    let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: sRGB,
+                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    ctx.setFillColor(CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 1))
+    ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+    return ctx.makeImage()!
+}
+
+private func count(_ img: CGImage, xs: Range<Int>, ys: Range<Int>, _ match: ((r: UInt8, g: UInt8, b: UInt8)) -> Bool) -> Int {
+    var n = 0
+    for y in ys { for x in xs where match(rgb(img, x, y)) { n += 1 } }
+    return n
+}
+
+@Test func captionedAIMarkDrawsAHandwrittenCaptionBelowTheShape() throws {
     let wide = DisplayGeometry(id: 1, frame: CGRect(x: 0, y: 0, width: 200, height: 100), scale: 2)
     let box = CGRect(x: 10, y: 10, width: 40, height: 20)   // pixels (20,20)-(100,60)
     let plain = try #require(AnnotationCompositor.compose(image: whiteImage(400, 200), display: wide,
@@ -78,12 +94,44 @@ private func isDark(_ p: (r: UInt8, g: UInt8, b: UInt8)) -> Bool { p.r < 60 && p
     let out = try #require(AnnotationCompositor.compose(image: whiteImage(400, 200), display: wide,
                                                          annotations: [aiBox(box, caption: "Save button")]))
     #expect(out.width == 400 && out.height == 200)
-    // The label starts 12 px below the shape (y ≈ 72) at x = 20, with a 6 px blue accent on its left.
-    let accent = rgb(out, 23, 85)
-    #expect(accent.b > 200 && accent.r < 60)
-    let dark = (30..<140).filter { isDark(rgb(out, $0, 75)) }
-    #expect(dark.count > 40)
-    #expect((30..<140).allSatisfy { rgb(plain, $0, 75).r > 250 })   // no label without a caption
+    // Blue ink below the shape (it starts 12 px below, y ≈ 72), and none there without a caption.
+    #expect(count(out, xs: 20..<300, ys: 72..<150, isBlue) > 150)
+    #expect(count(plain, xs: 20..<300, ys: 72..<150, isBlue) == 0)
+    // No dark box any more: the caption is ink on the page.
+    #expect(count(out, xs: 20..<300, ys: 72..<150) { $0.r < 60 && $0.g < 60 && $0.b < 60 } == 0)
+}
+
+@Test func captionHasAWhiteHaloOnDarkBackgrounds() throws {
+    let wide = DisplayGeometry(id: 1, frame: CGRect(x: 0, y: 0, width: 200, height: 100), scale: 2)
+    let out = try #require(AnnotationCompositor.compose(image: blackImage(400, 200), display: wide,
+                                                         annotations: [aiBox(CGRect(x: 10, y: 10, width: 40, height: 20), caption: "Save button")]))
+    #expect(count(out, xs: 20..<300, ys: 72..<150, isWhite) > 100)
+    #expect(count(out, xs: 20..<300, ys: 72..<150, isBlue) > 100)
+}
+
+@Test func aiRectIsSketchedAroundTheShape() throws {
+    let wide = DisplayGeometry(id: 1, frame: CGRect(x: 0, y: 0, width: 200, height: 100), scale: 2)
+    let a = aiBox(CGRect(x: 40, y: 20, width: 100, height: 50), caption: nil)   // pixels (80,40)-(280,140)
+    let out = try #require(AnnotationCompositor.compose(image: whiteImage(400, 200), display: wide, annotations: [a]))
+    // Ink near each side, the middle untouched.
+    #expect(count(out, xs: 150..<210, ys: 30..<50, isBlue) > 0)
+    #expect(count(out, xs: 150..<210, ys: 130..<150, isBlue) > 0)
+    #expect(count(out, xs: 70..<90, ys: 70..<110, isBlue) > 0)
+    #expect(count(out, xs: 270..<290, ys: 70..<110, isBlue) > 0)
+    #expect(count(out, xs: 110..<250, ys: 60..<120, isBlue) == 0)
+    // Same annotation, same pixels: the seed comes from its id.
+    let again = try #require(AnnotationCompositor.compose(image: whiteImage(400, 200), display: wide, annotations: [a]))
+    #expect(out.dataProvider?.data == again.dataProvider?.data)
+}
+
+@Test func aiHighlightTintsTheRect() throws {
+    let wide = DisplayGeometry(id: 1, frame: CGRect(x: 0, y: 0, width: 200, height: 100), scale: 2)
+    let a = Annotation(shape: .highlight(CGRect(x: 20, y: 20, width: 120, height: 20)), caption: nil, author: .ai, createdAt: 0, displayID: 1)
+    let out = try #require(AnnotationCompositor.compose(image: whiteImage(400, 200), display: wide, annotations: [a]))
+    // Pixels (40,40)-(280,80): mostly yellow-tinted (blue channel pulled down), still light.
+    let tinted = count(out, xs: 50..<270, ys: 45..<75) { $0.b < 200 && $0.r > 240 }
+    #expect(Double(tinted) > 0.9 * 220 * 30)
+    #expect(count(out, xs: 0..<400, ys: 120..<200) { $0.b < 250 } == 0)
 }
 
 @Test func labelRectSitsBelowTheShape() {
@@ -123,8 +171,6 @@ private func isDark(_ p: (r: UInt8, g: UInt8, b: UInt8)) -> Bool { p.r < 60 && p
                                                          annotations: [aiBox(CGRect(x: 44, y: 44, width: 4, height: 4),
                                                                              caption: "a very long caption that cannot possibly fit")]))
     #expect(out.width == 100 && out.height == 100)
-    // No room below, so the label goes above the shape (pixels 88-96), trimmed to the image width.
-    #expect(rgb(out, 2, 60).b > 200)                       // blue accent at the left edge
-    #expect((8..<40).contains { isDark(rgb(out, $0, 60)) })
-    #expect(!(0..<100).contains { isDark(rgb(out, $0, 98)) })
+    // No room below, so the caption goes above the shape (pixels 88-96), trimmed to the image width.
+    #expect(count(out, xs: 0..<100, ys: 30..<84, isBlue) > 40)
 }
