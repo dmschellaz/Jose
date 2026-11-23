@@ -17,6 +17,7 @@ final class AppModel {
     @ObservationIgnored private let overlay = OverlayController()
     @ObservationIgnored private let context = ContextService()
     @ObservationIgnored private let speech = SpeechService()
+    @ObservationIgnored private var live: LiveAnnotator!
     @ObservationIgnored private let pill = RecordingPillController()
     @ObservationIgnored private let onboarding = OnboardingWindowController()
     let paste = PasteSequencer()
@@ -27,13 +28,16 @@ final class AppModel {
 
     init() {
         let settings = self.settings
+        live = LiveAnnotator(llm: nil, model: settings.liveModel, frame: { [capture] t in await capture.liveFrame(near: t) })
         controller = SessionController(
             capture: capture,
-            services: [overlay, context, speech],   // stop order is reversed: speech flushes first
+            services: [overlay, context, speech, live],   // stop order is reversed: live, then speech flushes
             outputRoot: { settings.outputRoot },
             reportBuilder: { Self.makeReportBuilder(settings) })
         context.onPen = { [overlay] in overlay.setPen($0) }
         speech.onPartial = { [weak self] in self?.partialTranscript = $0 }
+        live.onMarks = { [overlay] marks in for m in marks { overlay.display(m, lifetime: 6) } }
+        live.onStatus = { [weak self] in self?.setLiveStatus($0) }
         paste.onFinished = { [pill] in pill.hide(after: .seconds(2)) }
     }
 
@@ -121,6 +125,7 @@ final class AppModel {
         isStarting = true
         defer { isStarting = false }
         liveStatus = .idle
+        live.configure(llm: mode == .manual ? nil : settings.apiKey().map { ClaudeHTTPClient(apiKey: $0) }, model: settings.liveModel)
         await controller.start(mode: mode)
         guard controller.isRecording else {
             if case let .failed(message) = controller.state {

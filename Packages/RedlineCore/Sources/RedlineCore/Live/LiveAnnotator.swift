@@ -34,8 +34,8 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
 
     private struct TimedOut: Error {}
 
-    private let llm: (any LLMClient)?
-    private let model: String
+    private var llm: (any LLMClient)?
+    private var model: String
     private let frame: @MainActor (_ t: Double) async -> LiveFrame?
     private let timeout: Duration
 
@@ -55,6 +55,12 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
         self.model = model
         self.frame = frame
         self.timeout = timeout
+    }
+
+    /// Changes the client and model for the next session (the API key or Settings may change between sessions).
+    public func configure(llm: (any LLMClient)?, model: String) {
+        self.llm = llm
+        self.model = model
     }
 
     public func start(context: SessionContext) async throws {
