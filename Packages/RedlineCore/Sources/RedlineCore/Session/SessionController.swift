@@ -17,11 +17,14 @@ public struct SessionClock: Sendable {
 public struct SessionContext {
     public let folder: SessionFolder
     public let clock: SessionClock
+    public let mode: SessionMode
     public let emit: @MainActor (TimelineEvent) -> Void
 
-    public init(folder: SessionFolder, clock: SessionClock, emit: @escaping @MainActor (TimelineEvent) -> Void) {
+    public init(folder: SessionFolder, clock: SessionClock, mode: SessionMode = .manual,
+                emit: @escaping @MainActor (TimelineEvent) -> Void) {
         self.folder = folder
         self.clock = clock
+        self.mode = mode
         self.emit = emit
     }
 }
@@ -120,7 +123,7 @@ public final class SessionController {
         metadata = SessionMetadata(startedAt: date, endedAt: nil, mode: mode, displays: [], tokens: TokenUsage())
         accepting = true
 
-        let context = SessionContext(folder: folder, clock: clock, emit: { [weak self] in self?.handle($0) })
+        let context = SessionContext(folder: folder, clock: clock, mode: mode, emit: { [weak self] in self?.handle($0) })
         do {
             for service in [capture as any SessionService] + services {
                 try await service.start(context: context)
