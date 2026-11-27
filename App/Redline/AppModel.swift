@@ -57,7 +57,9 @@ final class AppModel {
         Hotkeys.migrateOldDefaults()
         KeyboardShortcuts.onKeyUp(for: .toggleSession) { [weak self] in Task { @MainActor in await self?.toggleSession() } }
         KeyboardShortcuts.onKeyUp(for: .markMoment) { [weak self] in Task { @MainActor in self?.markMoment() } }
-        if !Permission.missing.isEmpty { onboarding.show() }
+        Task { @MainActor in
+            if await !Permission.missing().isEmpty { onboarding.show() }
+        }
     }
 
     func toggleSession() async {
@@ -120,7 +122,7 @@ final class AppModel {
     // MARK: - Private
 
     private func startSession() async {
-        guard Permission.missing.isEmpty else {
+        guard await Permission.missing().isEmpty else {
             onboarding.show()
             return
         }

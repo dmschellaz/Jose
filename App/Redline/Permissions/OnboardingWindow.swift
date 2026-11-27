@@ -20,35 +20,56 @@ final class OnboardingWindowController {
     }
 }
 
+@MainActor @Observable
+private final class PermissionChecker {
+    var granted: [Permission: Bool] = [:]
+    var checking = false
+
+    func refresh() async {
+        checking = true
+        var next: [Permission: Bool] = [:]
+        for p in Permission.allCases { next[p] = await p.isGranted() }
+        granted = next
+        checking = false
+    }
+}
+
 private struct OnboardingView: View {
-    @State private var refresh = 0
+    @State private var checker = PermissionChecker()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Redline needs a few permissions").font(.title2.bold())
             ForEach(Permission.allCases) { p in
+                let ok = checker.granted[p] ?? false
                 HStack(alignment: .top) {
-                    Image(systemName: p.isGranted ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(p.isGranted ? .green : .secondary)
+                    Image(systemName: ok ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(ok ? .green : .secondary)
                     VStack(alignment: .leading) {
                         Text(p.title).bold()
                         Text(p.reason).font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    if !p.isGranted {
-                        Button("Grant") { Task { await p.request(); refresh += 1 } }
+                    if !ok {
+                        Button("Grant") { Task { await p.request(); await checker.refresh() } }
                     }
                 }
             }
-            .id(refresh)
-            Text("After granting Screen Recording or Input Monitoring, macOS may ask you to quit and reopen Redline. Do that, then click Re-check.")
+            Text("Already switched on in System Settings but still unchecked here? macOS ties each permission to the exact build of Redline. Open that list, select Redline, remove it with the – button, then click Grant again.")
                 .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             HStack {
+                Button("Quit & Reopen Redline") { Permission.relaunch() }
                 Spacer()
-                Button("Re-check") { refresh += 1 }
+                if checker.checking { ProgressView().controlSize(.small) }
+                Button("Re-check") { Task { await checker.refresh() } }
             }
         }
         .padding(24)
         .frame(width: 480)
+        .task { await checker.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await checker.refresh() }
+        }
     }
 }
