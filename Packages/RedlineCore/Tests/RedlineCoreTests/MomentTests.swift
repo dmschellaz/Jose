@@ -98,3 +98,35 @@ private func aiMark(_ t: Double, _ caption: String? = "Save button") -> Annotati
     ])
     #expect(seg[0].keyframe?.file == "user.png")
 }
+
+@Test func questionsAndAnswersAttachToTheirSentencesMoment() {
+    let first = UUID(), q1 = UUID(), q2 = UUID()
+    // The question about the first sentence came late (t = 9.5), nearer to moment 2 by time.
+    let m = MomentSegmenter.segment([
+        .sentence(id: first, text: "make this bigger", start: 0, end: 2),
+        .aiQuestion(id: q1, sentenceID: first, text: "Which button?", options: ["Save", "Cancel"], t: 9.5),
+        .sentence(id: UUID(), text: "and this row", start: 10, end: 12),
+        .questionAnswered(id: q1, answer: "Save", via: .click, t: 11),
+        .aiQuestion(id: q2, sentenceID: UUID(), text: "Which row?", options: ["Top", "Bottom"], t: 12.5),
+    ])
+    #expect(m.count == 2)
+    #expect(m[0].clarifications == [Clarification(questionID: q1, question: "Which button?", options: ["Save", "Cancel"],
+                                                  answer: "Save", via: .click, t: 9.5)])
+    #expect(m[0].clarifications[0].isAnswered)
+    // Unknown sentence: nearest moment. Never answered: no answer, not answered.
+    #expect(m[1].clarifications.map(\.question) == ["Which row?"])
+    #expect(m[1].clarifications[0].answer == nil && m[1].clarifications[0].via == nil && !m[1].clarifications[0].isAnswered)
+}
+
+@Test func skippedQuestionsHaveNoAnswer() {
+    let id = UUID(), q = UUID()
+    let m = MomentSegmenter.segment([
+        .sentence(id: id, text: "fix the header", start: 0, end: 2),
+        .aiQuestion(id: q, sentenceID: id, text: "Logo or title?", options: ["Logo", "Title"], t: 3),
+        .questionAnswered(id: q, answer: "", via: .skipped, t: 23),
+    ])
+    #expect(m[0].clarifications.count == 1)
+    #expect(m[0].clarifications[0].via == .skipped)
+    #expect(m[0].clarifications[0].answer == nil)
+    #expect(!m[0].clarifications[0].isAnswered)
+}

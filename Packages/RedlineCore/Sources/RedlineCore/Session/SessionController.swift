@@ -250,10 +250,17 @@ public final class SessionController {
         state = .finalizing
         var doc = document()
         if let ids = sentenceIDs {
+            // A question goes with the sentence it asked about; its answer goes with the question.
+            let keptQuestions = Set(doc.events.compactMap { e -> UUID? in
+                guard case let .aiQuestion(qid, sid, _, _, _) = e, ids.contains(sid) else { return nil }
+                return qid
+            })
             doc.events = doc.events.filter { e in
                 switch e {
                 case let .sentence(id, _, _, _): return ids.contains(id)
                 case let .aiAnnotation(id, _, _): return ids.contains(id)
+                case let .aiQuestion(_, sid, _, _, _): return ids.contains(sid)
+                case let .questionAnswered(qid, _, _, _): return keptQuestions.contains(qid)
                 default: return true
                 }
             }

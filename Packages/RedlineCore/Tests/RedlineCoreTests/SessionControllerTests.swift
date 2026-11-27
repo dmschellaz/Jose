@@ -120,6 +120,31 @@ final class FakeBuilder: ReportBuilding, @unchecked Sendable {
         #expect(saved.events.filter { if case .sentence = $0 { true } else { false } }.count == 2)
     }
 
+    @Test func reviewKeepsQuestionsOfChosenSentencesOnly() async throws {
+        let builder = FakeBuilder()
+        let (c, _) = makeController(builder: builder)
+        c.holdReportForReview = true
+        await c.start(mode: .chatty)
+        let keep = UUID(), drop = UUID(), qKeep = UUID(), qDrop = UUID()
+        c.handle(.sentence(id: keep, text: "keep me", start: 1, end: 2))
+        c.handle(.aiQuestion(id: qKeep, sentenceID: keep, text: "Which card?", options: ["Billing", "Profile"], t: 2.5))
+        c.handle(.questionAnswered(id: qKeep, answer: "Billing", via: .click, t: 3))
+        c.handle(.sentence(id: drop, text: "drop me", start: 5, end: 6))
+        c.handle(.aiQuestion(id: qDrop, sentenceID: drop, text: "Which row?", options: ["Top", "Bottom"], t: 6.5))
+        c.handle(.questionAnswered(id: qDrop, answer: "", via: .skipped, t: 27))
+        await c.stop()
+        await c.writeReport(including: [keep])
+        let doc = try #require(builder.document)
+        let questionIDs = doc.events.compactMap { e -> UUID? in
+            switch e {
+            case let .aiQuestion(id, _, _, _, _): id
+            case let .questionAnswered(id, _, _, _): id
+            default: nil
+            }
+        }
+        #expect(questionIDs == [qKeep, qKeep])
+    }
+
     @Test func endReviewLeavesSessionOnDisk() async throws {
         let (c, _) = makeController()
         c.holdReportForReview = true
