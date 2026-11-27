@@ -43,6 +43,15 @@ public struct SilenceDetector: Sendable {
         return lastVoice - start >= minSpeech ? lastVoice : nil
     }
 
+    /// The audio was cut off at `t` (e.g. the mic gate closed). Ends any speech in progress the way `feed`
+    /// would, returning when the voice stopped, but never touches the learned noise floor.
+    public mutating func interrupt(at t: Double) -> Double? {
+        guard let start = speechStart else { return nil }
+        speechStart = nil
+        let end = min(lastVoice, t)
+        return end - start >= minSpeech ? end : nil
+    }
+
     /// Root-mean-square level of float samples in dBFS.
     public static func level(_ samples: UnsafeBufferPointer<Float>) -> Double {
         guard !samples.isEmpty else { return -120 }

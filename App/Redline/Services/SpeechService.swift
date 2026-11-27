@@ -13,6 +13,8 @@ private final class AudioPipe: @unchecked Sendable {
     private var detector = SilenceDetector()
     /// Seconds of audio handed to the analyzer so far (its timeline starts at 0).
     private var fedSeconds: Double = 0
+    /// Audio-thread only: for spotting the moment the gate closes.
+    private var wasListening = true
     /// Called on the audio thread with the analyzer-timeline time the speech stopped.
     let onUtteranceEnd: @Sendable (Double) -> Void
     /// Read on the audio thread: closed while Chatty speaks, plus a short tail.
@@ -62,12 +64,17 @@ private final class AudioPipe: @unchecked Sendable {
             let start = fedSeconds
             continuation.yield(AnalyzerInput(buffer: out))
             fedSeconds += Double(out.frameLength) / outFormat.sampleRate
-            if let channel = buffer.floatChannelData?[0] {
-                let level = listening
-                    ? SilenceDetector.level(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
-                    : -120
-                let duration = Double(buffer.frameLength) / buffer.format.sampleRate
-                if let end = detector.feed(level: level, at: start, duration: duration) { onUtteranceEnd(end) }
+            if listening {
+                wasListening = true
+                if let channel = buffer.floatChannelData?[0] {
+                    let level = SilenceDetector.level(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
+                    let duration = Double(buffer.frameLength) / buffer.format.sampleRate
+                    if let end = detector.feed(level: level, at: start, duration: duration) { onUtteranceEnd(end) }
+                }
+            } else if wasListening {
+                // Gate just closed: end any speech in progress, without feeding fake levels that would wreck the noise floor.
+                wasListening = false
+                if let end = detector.interrupt(at: start) { onUtteranceEnd(end) }
             }
         }
     }
