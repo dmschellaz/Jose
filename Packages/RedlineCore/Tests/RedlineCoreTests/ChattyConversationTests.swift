@@ -55,9 +55,29 @@ private let which = LiveQuestion(text: "Which button?", options: ["Save", "Cance
         var c = ChattyConversation()
         let qOut = c.respond(say: "", question: which, sentenceID: sentence, at: 5)
         let q = try #require(qOut.asked)
-        #expect(c.answer("Save", via: .click, at: 7) == .questionAnswered(id: q.id, answer: "Save", via: .click, t: 7))
+        #expect(c.answer(q.id, "Save", via: .click, at: 7) == .questionAnswered(id: q.id, answer: "Save", via: .click, t: 7))
         #expect(c.open == nil)
-        #expect(c.answer("Cancel", via: .click, at: 8) == nil)
+        #expect(c.answer(q.id, "Cancel", via: .click, at: 8) == nil)
+    }
+
+    @Test func lateClickForAnOldQuestionIsIgnored() throws {
+        var c = ChattyConversation()
+        let oldOut = c.respond(say: "", question: which, sentenceID: sentence, at: 5)
+        let old = try #require(oldOut.asked)
+        _ = c.expire(old.id, at: 25)
+        let newOut = c.respond(say: "", question: LiveQuestion(text: "Which row?", options: ["Top", "Bottom"]),
+                               sentenceID: UUID(), at: 30)
+        let newer = try #require(newOut.asked)
+        #expect(c.answer(old.id, "Save", via: .click, at: 31) == nil)
+        #expect(c.open == newer)
+    }
+
+    @Test func answerViaVoiceIsRefused() throws {
+        var c = ChattyConversation()
+        let qOut = c.respond(say: "", question: which, sentenceID: sentence, at: 5)
+        let q = try #require(qOut.asked)
+        #expect(c.answer(q.id, "the save one", via: .voice, at: 7) == nil)
+        #expect(c.open == q)
     }
 
     @Test func voiceAnswerIsTheNextSentenceAfterTheQuestion() throws {
@@ -74,6 +94,24 @@ private let which = LiveQuestion(text: "Which button?", options: ["Save", "Cance
         #expect(c.open == nil)
     }
 
+    @Test func voiceAnswerStartingExactlyWhenAskedCounts() throws {
+        var c = ChattyConversation()
+        let qOut = c.respond(say: "", question: which, sentenceID: sentence, at: 5)
+        let q = try #require(qOut.asked)
+        let answeredOut = c.voiceAnswer(text: "save", start: 5, at: 6)
+        let answered = try #require(answeredOut)
+        #expect(answered.event == .questionAnswered(id: q.id, answer: "save", via: .voice, t: 6))
+        #expect(c.open == nil)
+    }
+
+    @Test func blankVoiceAnswerIsIgnored() throws {
+        var c = ChattyConversation()
+        let qOut = c.respond(say: "", question: which, sentenceID: sentence, at: 5)
+        let q = try #require(qOut.asked)
+        #expect(c.voiceAnswer(text: "  ", start: 5.5, at: 7) == nil)
+        #expect(c.open == q)
+    }
+
     @Test func expireClosesOnlyThatQuestionAndResetClearsEverything() throws {
         var c = ChattyConversation()
         let qOut = c.respond(say: "", question: which, sentenceID: sentence, at: 5)
@@ -85,5 +123,17 @@ private let which = LiveQuestion(text: "Which button?", options: ["Save", "Cance
         c.reset()
         #expect(c.open == nil)
         #expect(c.respond(say: "Hello.", question: nil, sentenceID: sentence, at: 31).speak == "Hello.")
+    }
+
+    @Test func expireOfAnOldQuestionIsIgnoredWhileANewerOneIsOpen() throws {
+        var c = ChattyConversation()
+        let oldOut = c.respond(say: "", question: which, sentenceID: sentence, at: 5)
+        let old = try #require(oldOut.asked)
+        _ = c.answer(old.id, "Save", via: .click, at: 6)
+        let newOut = c.respond(say: "", question: LiveQuestion(text: "Which row?", options: ["Top", "Bottom"]),
+                               sentenceID: UUID(), at: 30)
+        let newer = try #require(newOut.asked)
+        #expect(c.expire(old.id, at: 50) == nil)
+        #expect(c.open == newer)
     }
 }

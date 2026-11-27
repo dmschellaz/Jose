@@ -8,7 +8,8 @@ import Foundation
 /// - Only one clarifying question is open at a time. A new one while another is open is dropped; that answer's
 ///   remark may still be spoken. When a question opens, only its text is spoken.
 /// - The open question closes on a click (`answer`), on the reviewer's next sentence that started after it was
-///   asked (`voiceAnswer`), or as skipped (`answer(_:via: .skipped,…)` or `expire`).
+///   asked (`voiceAnswer`), or as skipped (`answer(_:_:via: .skipped,…)` or `expire`). Every close names the
+///   question id, so a late click or timeout for an old question cannot close a newer one.
 public struct ChattyConversation: Sendable {
     public static let lineInterval: Double = 10
 
@@ -67,9 +68,10 @@ public struct ChattyConversation: Sendable {
         return Outcome(speak: line, said: line)
     }
 
-    /// Closes the open question with `answer` (a clicked option, or "" with `.skipped`). nil when none is open.
-    public mutating func answer(_ answer: String, via: AnswerVia, at t: Double) -> TimelineEvent? {
-        guard let q = open else { return nil }
+    /// Closes question `id` with `answer` (a clicked option, or "" with `.skipped`). nil unless `id` is the open
+    /// question, or when `via` is `.voice` (voice answers go through `voiceAnswer`).
+    public mutating func answer(_ id: UUID, _ answer: String, via: AnswerVia, at t: Double) -> TimelineEvent? {
+        guard via != .voice, let q = open, q.id == id else { return nil }
         open = nil
         return .questionAnswered(id: q.id, answer: answer, via: via, t: t)
     }
@@ -77,12 +79,13 @@ public struct ChattyConversation: Sendable {
     /// The 20 s timeout: skips question `id` if it is still the open one.
     public mutating func expire(_ id: UUID, at t: Double) -> TimelineEvent? {
         guard open?.id == id else { return nil }
-        return answer("", via: .skipped, at: t)
+        return answer(id, "", via: .skipped, at: t)
     }
 
     /// A finished sentence answers the open question if it started at or after the question was asked.
     public mutating func voiceAnswer(text: String, start: Double, at t: Double) -> (question: Question, event: TimelineEvent)? {
-        guard let q = open, start >= q.askedAt else { return nil }
+        let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !line.isEmpty, let q = open, start >= q.askedAt else { return nil }
         open = nil
         return (q, .questionAnswered(id: q.id, answer: text, via: .voice, t: t))
     }
