@@ -49,3 +49,30 @@ extension TokenUsage {
         TokenUsage(input: a.input + b.input, output: a.output + b.output)
     }
 }
+
+/// A clarifying question from the live model (Chatty): read aloud, and shown in the island with its
+/// options as buttons plus Skip.
+public struct LiveQuestion: Equatable, Sendable {
+    public var text: String
+    /// 2–3 short answers, at most 4 words each.
+    public var options: [String]
+
+    public init(text: String, options: [String]) {
+        self.text = text
+        self.options = options
+    }
+}
+
+/// Everything one live answer holds. Outside Chatty mode `say` is "" and `question` is nil.
+public struct LiveAnswer: Equatable, Sendable {
+    public var marks: [Annotation]
+    /// A short line to speak, at most 12 words; "" to stay silent.
+    public var say: String
+    public var question: LiveQuestion?
+
+    public init(marks: [Annotation], say: String, question: LiveQuestion?) {
+        self.marks = marks
+        self.say = say
+        self.question = question
+    }
+}
