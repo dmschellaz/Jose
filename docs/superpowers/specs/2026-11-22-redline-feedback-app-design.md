@@ -230,3 +230,25 @@ Each phase is independently usable.
 - **Name:** "Redline" is a working name.
 - **Hotkeys:** ⌃⌥⇧F / ⌃⌥⇧M / hold ⌥ for pen. (Changed from ⌃⌥F / ⌃⌥M because window managers such as Magnet use ⌃⌥ + letters; ⌃⌥F is Magnet's "Center Third".) Hold-⌥ may conflict with apps that use Option-drag; if so, change the pen to hold ⌃⌥.
 - **Distribution:** local Xcode builds signed with your personal team; no notarization or auto-update in v1.
+
+## 10. Phase 3 addendum: Chatty mode (decided 2026-11-26)
+
+These decisions replace the Chatty parts of §3.1 and §4.1 (Voice, LiveAnnotator `say`/`question`) where they differ.
+
+- **When it speaks.** Only when its mark might be wrong or the reviewer has switched topic, in at most 12 words. Otherwise it stays silent and just draws, as Live mode does. At most one spoken line every 10 s, except for questions.
+- **Clarifying questions.**
+  - Chatty asks only when two or more things on screen fit the sentence, or when the requested change is unclear.
+  - A question comes with 2–3 short answer options, each at most 4 words. It shows in the island with those options plus **Skip**, and it is also spoken.
+  - The reviewer answers by clicking an option, or by speaking. The next finished sentence counts as the answer.
+  - An unanswered question is skipped after 20 s. Only one question can be open at a time.
+- **Model output.** The Live answer schema gains `say` (string, "" when silent) and `question` (`text`, "" when none, plus `options`). Structured outputs are used, as in Live.
+- **Timeline.** There are two new events:
+  - `aiQuestion(id, sentenceID, text, options, t)`
+  - `questionAnswered(id, answer, via: click | voice | skipped, t)`
+  - Older `session.json` files still decode.
+- **Report.** Each moment carries its Q&A. Every item gets a "Clarified: <question> → <answer>" line in `feedback.md`. The report prompt treats answers as the reviewer's own words.
+- **Voice.** `AVSpeechSynthesizer` with a built-in voice chosen in Settings, with no extra account.
+- **Audio.** Sessions keep the Mac's output muted as in Live. Redline lifts the mute only while a line is spoken, then mutes again.
+  - **Mic gate (replaces voice processing):** while Chatty speaks, plus a 300 ms tail, the microphone input is ignored, so its own voice is never transcribed.
+  - **No barge-in:** the island has a **Stop talking** button instead.
+- **Out of scope:** barge-in, third-party voices, and multi-turn conversations.

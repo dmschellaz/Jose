@@ -250,10 +250,24 @@ public final class SessionController {
         state = .finalizing
         var doc = document()
         if let ids = sentenceIDs {
+            // A question goes with the sentence it asked about; its answer goes with the question.
+            let keptQuestions = Set(doc.events.compactMap { e -> UUID? in
+                guard case let .aiQuestion(qid, sid, _, _, _) = e, ids.contains(sid) else { return nil }
+                return qid
+            })
+            let keptSentenceEnds = Set(doc.events.compactMap { e -> Double? in
+                guard case let .sentence(id, _, _, end) = e, ids.contains(id) else { return nil }
+                return end
+            })
             doc.events = doc.events.filter { e in
                 switch e {
                 case let .sentence(id, _, _, _): return ids.contains(id)
                 case let .aiAnnotation(id, _, _): return ids.contains(id)
+                case let .aiQuestion(_, sid, _, _, _): return ids.contains(sid)
+                case let .questionAnswered(qid, _, via, t):
+                    guard keptQuestions.contains(qid) else { return false }
+                    // A spoken answer is a sentence's words: it goes only if that sentence (stamped at its end) is kept.
+                    return via != .voice || keptSentenceEnds.contains(t)
                 default: return true
                 }
             }

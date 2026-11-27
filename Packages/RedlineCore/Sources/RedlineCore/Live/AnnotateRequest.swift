@@ -2,9 +2,15 @@ import CoreGraphics
 import Foundation
 
 /// Builds the Live-mode "annotate" request and turns its answer into on-screen AI marks.
+/// In Chatty mode the same request also asks for a short spoken line and an optional clarifying question.
 public enum AnnotateRequest {
     /// At most this many marks are kept from one answer.
     public static let maxMarks = 3
+    /// Chatty limits (spec §10): a spoken line is at most 12 words; a question has 2–3 options of at most 4 words.
+    public static let maxSayWords = 12
+    public static let maxOptionWords = 4
+    public static let minOptions = 2
+    public static let maxOptions = 3
     /// Boxes thinner than this (image pixels) are widened to it around their centre, so a point or a
     /// one-line answer still makes a visible mark.
     static let minBox: Double = 16
@@ -29,8 +35,25 @@ public enum AnnotateRequest {
     - If the sentence doesn't refer to anything on screen (thinking aloud, "ok, next"), return no marks.
     """
 
-    public static let schema: JSONValue = {
+    /// Appended to `systemPrompt` in Chatty mode.
+    public static let chattyPrompt = """
+    Chatty mode is on: as well as marking, you can talk to the reviewer. What you put in say and question is read aloud.
+    - say: one short line of at most 12 words, or "" to stay silent. Stay silent most of the time and just mark. \
+    Speak only when your mark might be wrong ("Did you mean the left card?") or when the reviewer has \
+    moved on to a new topic or page ("Now looking at billing."). Never repeat their words or describe your mark.
+    - question: ask only when two or more things on screen fit what they said, or when the change they want is \
+    unclear. text is the question, at most 12 words, and must make sense heard on its own. options are 2 or 3 \
+    short answers of at most 4 words each; they are shown as buttons. When you ask, still mark your best guess \
+    and leave say "". When you don't need to ask, give text "" and options [].
+    - If you just asked a question, this sentence is the reviewer's answer: mark what they picked and don't ask again.
+    """
+
+    public static let schema: JSONValue = makeSchema(chatty: false)
+    public static let chattySchema: JSONValue = makeSchema(chatty: true)
+
+    static func makeSchema(chatty: Bool) -> JSONValue {
         func num() -> JSONValue { .object(["type": .string("number")]) }
+        func str() -> JSONValue { .object(["type": .string("string")]) }
         let keys = ["shape", "x", "y", "w", "h", "caption"]
         let mark: JSONValue = .object([
             "type": .string("object"),
@@ -40,25 +63,42 @@ public enum AnnotateRequest {
                     "enum": .array(["circle", "rect", "arrow", "highlight"].map(JSONValue.string)),
                 ]),
                 "x": num(), "y": num(), "w": num(), "h": num(),
-                "caption": .object(["type": .string("string")]),
+                "caption": str(),
             ]),
             "required": .array(keys.map(JSONValue.string)),
             "additionalProperties": .bool(false),
         ])
+        var properties: [String: JSONValue] = ["marks": .object(["type": .string("array"), "items": mark])]
+        var required: [JSONValue] = [.string("marks")]
+        if chatty {
+            properties["say"] = str()
+            properties["question"] = .object([
+                "type": .string("object"),
+                "properties": .object([
+                    "text": str(),
+                    "options": .object(["type": .string("array"), "items": str()]),
+                ]),
+                "required": .array([.string("text"), .string("options")]),
+                "additionalProperties": .bool(false),
+            ])
+            required += [.string("say"), .string("question")]
+        }
         return .object([
             "type": .string("object"),
-            "properties": .object(["marks": .object(["type": .string("array"), "items": mark])]),
-            "required": .array([.string("marks")]),
+            "properties": .object(properties),
+            "required": .array(required),
             "additionalProperties": .bool(false),
         ])
-    }()
+    }
 
     /// - Parameters:
     ///   - sentence: the sentence just finished.
     ///   - recentSentences: earlier sentences for context, oldest first (the current one excluded).
     ///   - clicks: clicks since the previous sentence, in global points, on `frame.display`.
+    ///   - chatty: adds `chattyPrompt` and the `say`/`question` fields.
+    ///   - answering: the question this sentence answers (Chatty voice answer), if any.
     public static func make(model: String, frame: LiveFrame, sentence: String, recentSentences: [String],
-                            clicks: [CGPoint], url: String?) -> MessagesRequest {
+                            clicks: [CGPoint], url: String?, chatty: Bool = false, answering: String? = nil) -> MessagesRequest {
         var lines: [String] = []
         lines.append("Page: \(url ?? "unknown")")
         lines.append("Screenshot size: \(Int(frame.pixelSize.width.rounded()))x\(Int(frame.pixelSize.height.rounded())) px")
@@ -72,14 +112,17 @@ public enum AnnotateRequest {
             }
             lines.append("Clicks (image px): " + pts.joined(separator: ", "))
         }
+        if let answering {
+            lines.append("You asked: \(answering)\nThis sentence is the reviewer's answer.")
+        }
         lines.append("Reviewer just said: \(sentence)")
 
         return MessagesRequest(
             model: model,
             max_tokens: 2000,
-            system: systemPrompt,
+            system: chatty ? systemPrompt + "\n\n" + chattyPrompt : systemPrompt,
             messages: [.init(role: "user", content: [.jpeg(frame.jpeg), .text(lines.joined(separator: "\n"))])],
-            output_config: .init(effort: "low", format: .init(schema: schema)),
+            output_config: .init(effort: "low", format: .init(schema: chatty ? chattySchema : schema)),
             thinking: thinking(for: model),
             fallbacks: model.hasPrefix("claude-sonnet") ? "default" : nil)
     }
@@ -97,18 +140,57 @@ public enum AnnotateRequest {
         var x, y, w, h: Double
         var caption: String
     }
-    private struct Envelope: Decodable { var marks: [Mark] }
+    private struct Question: Decodable {
+        var text: String
+        var options: [String]
+    }
+    /// `say` and `question` are only present in Chatty answers.
+    private struct Envelope: Decodable {
+        var marks: [Mark]
+        var say: String?
+        var question: Question?
+    }
 
-    /// Converts the model's answer (bounding boxes in image pixels) into AI annotations in global points.
-    /// A box with no position at all is dropped; a too-thin one is widened; everything is clamped to the image.
-    /// At most `maxMarks` are kept.
+    /// Converts the model's answer into AI annotations in global points (see `parseAnswer`).
     public static func parse(_ text: String, frame: LiveFrame, createdAt: Double) throws -> [Annotation] {
+        try parseAnswer(text, frame: frame, createdAt: createdAt).marks
+    }
+
+    /// Reads a Live or Chatty answer.
+    /// - Marks: a box with no position at all is dropped, a too-thin one is widened, everything is clamped to
+    ///   the image, and at most `maxMarks` are kept.
+    /// - `say` is trimmed to `maxSayWords` words.
+    /// - The question is trimmed. Its options are cut to `maxOptionWords` words, de-duplicated ignoring case and
+    ///   capped at `maxOptions`. It is dropped if its text is empty or fewer than `minOptions` options remain.
+    public static func parseAnswer(_ text: String, frame: LiveFrame, createdAt: Double) throws -> LiveAnswer {
         let envelope: Envelope
         do {
             envelope = try JSONDecoder().decode(Envelope.self, from: Data(text.utf8))
         } catch {
             throw ClaudeError.invalidJSON(String(text.prefix(200)))
         }
+        return LiveAnswer(marks: annotations(envelope.marks, frame: frame, createdAt: createdAt),
+                          say: words(envelope.say ?? "", max: maxSayWords),
+                          question: envelope.question.flatMap(liveQuestion))
+    }
+
+    /// The first `max` words of `s`, with runs of whitespace collapsed; "" when blank.
+    static func words(_ s: String, max: Int) -> String {
+        s.split(whereSeparator: \.isWhitespace).prefix(max).joined(separator: " ")
+    }
+
+    private static func liveQuestion(_ q: Question) -> LiveQuestion? {
+        let text = words(q.text, max: maxSayWords)
+        var options: [String] = []
+        for option in q.options.map({ words($0, max: maxOptionWords) }) where !option.isEmpty {
+            if !options.contains(where: { $0.caseInsensitiveCompare(option) == .orderedSame }) { options.append(option) }
+        }
+        options = Array(options.prefix(maxOptions))
+        guard !text.isEmpty, options.count >= minOptions else { return nil }
+        return LiveQuestion(text: text, options: options)
+    }
+
+    private static func annotations(_ marks: [Mark], frame: LiveFrame, createdAt: Double) -> [Annotation] {
         let size = frame.pixelSize
         guard size.width > 0, size.height > 0 else { return [] }
         let bounds = CGRect(origin: .zero, size: size)
@@ -127,7 +209,7 @@ public enum AnnotateRequest {
         let pointsPerPixel = display.frame.width / size.width
 
         var out: [Annotation] = []
-        for m in envelope.marks {
+        for m in marks {
             guard [m.x, m.y, m.w, m.h].allSatisfy(\.isFinite), !(m.x == 0 && m.y == 0 && m.w == 0 && m.h == 0) else { continue }
             var box = CGRect(x: m.x, y: m.y, width: m.w, height: m.h).standardized
             box = box.insetBy(dx: -max(0, minBox - box.width) / 2, dy: -max(0, minBox - box.height) / 2)

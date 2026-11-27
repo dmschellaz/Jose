@@ -87,3 +87,26 @@ private func makeSession() throws -> (SessionDocument, SessionFolder) {
     #expect(!result.usedAI)
     #expect(result.error == "Nothing was said or marked in this session.")
 }
+
+@Test func answeredQuestionsReachFeedbackMarkdown() async throws {
+    var (doc, folder) = try makeSession()
+    let q = UUID(), skipped = UUID()
+    doc.events += [
+        .aiQuestion(id: q, sentenceID: UUID(), text: "Which card?", options: ["Billing card", "Plan card"], t: 2.5),
+        .questionAnswered(id: q, answer: "Billing card", via: .voice, t: 4),
+        .aiQuestion(id: skipped, sentenceID: UUID(), text: "Smaller font too?", options: ["Yes", "No"], t: 4.5),
+        .questionAnswered(id: skipped, answer: "", via: .skipped, t: 25),
+    ]
+    // Fallback report (no key): still one Clarified line, for the answered question only.
+    _ = await ReportBuilder(llm: nil, model: "m", timeZone: .gmt).build(document: doc, folder: folder)
+    let fallback = try String(contentsOf: folder.feedbackURL, encoding: .utf8)
+    #expect(fallback.contains("- **Clarified:** Which card? → Billing card\n"))
+    #expect(fallback.components(separatedBy: "**Clarified:**").count == 2)
+
+    // AI report: the item that lists moment 1 gets the same line.
+    let llm = FakeLLM(text: #"{"items":[{"title":"Loosen billing card padding","moment_ids":[1],"where":"/billing","problem":"cramped","wanted":"more padding","quote":"this card is too cramped","image_caption":""}]}"#)
+    _ = await ReportBuilder(llm: llm, model: "claude-sonnet-5-5", timeZone: .gmt).build(document: doc, folder: folder)
+    let ai = try String(contentsOf: folder.feedbackURL, encoding: .utf8)
+    #expect(ai.contains("## 1. Loosen billing card padding"))
+    #expect(ai.contains("- **Clarified:** Which card? → Billing card\n"))
+}

@@ -54,6 +54,24 @@ To throw a session away: **Cancel** on the island (click twice) or **Cancel Sess
 3. A blue dot by the timer means a request is in flight. An orange dot with "AI offline" means the last one failed or timed out. Recording carries on either way.
 4. In the report, blue marks appear in the screenshots with their labels. The island shows a second "Live:" cost line.
 
+## 4c. Try Chatty mode
+
+Chatty is Live mode with a voice. It still draws blue marks, and it talks only when that helps.
+
+1. In the menu bar menu, set **Mode** to **Chatty**. Like Live, it needs an API key and uses the live model from Settings → Live mode.
+2. Pick a voice in **Settings → Chatty mode → Voice** and press **Preview**. Only voices that come with macOS are listed. Add nicer ones (Enhanced or Premium) in System Settings → Accessibility → Spoken Content → System voice → Manage Voices.
+3. Start a session and talk as in Live mode. Most of the time Chatty just draws. It says a short line (12 words at most) only when it isn't sure of its mark or you've moved on to something new, and never more than once every 10 s.
+4. When two things on screen could match what you said ("make that button bigger" with two buttons visible), it asks a question. You hear it, and the island shows it with 2–3 answer buttons and **Skip**. Answer in one of three ways:
+   - Click an answer.
+   - Just say it ("the left one"): your next sentence counts as the answer.
+   - Ignore it: it closes by itself after 20 s.
+
+   Only one question is open at a time.
+5. Your other audio stays muted during the session. It comes back only while Chatty speaks, so you can hear it, and then mutes again. If you muted the Mac yourself, Chatty stays silent. Redline doesn't listen while it speaks (plus a moment after), so its own voice never ends up in your transcript. You can't interrupt it by talking: click **Stop talking** on the island instead.
+6. In the report, each item you clarified gets a line like `Clarified: Which button? → Save`. The write-up treats your answer as your own words.
+
+If Chatty's voice shows up in your transcript, check the Debug menu's **Chatty voice + mic gate 12 s** test (debug builds).
+
 ## 5. Look at the result
 
 Click the notification, or menu → **Recent Sessions**. Each session is a folder in `~/Feedback/`, for example `~/Feedback/localhost-3000-2026-11-22-1430/`:
@@ -85,7 +103,7 @@ The island shows which paste is next and closes itself after the second. The wri
 ## Other menu items
 
 - **Regenerate Last Report**: rebuilds the write-up for the last session (e.g. after adding an API key or switching models).
-- **Debug** (debug builds only): quick tests of each piece (capture a screenshot, transcribe 10 s, log clicks and the URL, test the drawing overlay).
+- **Debug** (debug builds only): quick tests of each piece (capture a screenshot, transcribe 10 s, the mic gate, Chatty's voice, log clicks and the URL, test the drawing overlay).
 
 ## If something doesn't work
 

@@ -13,16 +13,28 @@ private final class AudioPipe: @unchecked Sendable {
     private var detector = SilenceDetector()
     /// Seconds of audio handed to the analyzer so far (its timeline starts at 0).
     private var fedSeconds: Double = 0
+    /// Audio-thread only: for spotting the moment the gate closes.
+    private var wasListening = true
     /// Called on the audio thread with the analyzer-timeline time the speech stopped.
     let onUtteranceEnd: @Sendable (Double) -> Void
+    /// Read on the audio thread: closed while Chatty speaks, plus a short tail.
+    let gate: MicGate
 
     init?(from inFormat: AVAudioFormat, to outFormat: AVAudioFormat, continuation: AsyncStream<AnalyzerInput>.Continuation,
-          onUtteranceEnd: @escaping @Sendable (Double) -> Void) {
+          gate: MicGate, onUtteranceEnd: @escaping @Sendable (Double) -> Void) {
         guard let converter = AVAudioConverter(from: inFormat, to: outFormat) else { return nil }
         self.converter = converter
         self.outFormat = outFormat
         self.continuation = continuation
+        self.gate = gate
         self.onUtteranceEnd = onUtteranceEnd
+    }
+
+    /// Zeroes every sample but keeps the length, so the analyzer's timeline stays in step with the clock.
+    private static func silence(_ buffer: AVAudioPCMBuffer) {
+        for b in UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList) {
+            if let data = b.mData { memset(data, 0, Int(b.mDataByteSize)) }
+        }
     }
 
     func push(_ buffer: AVAudioPCMBuffer) {
@@ -46,13 +58,23 @@ private final class AudioPipe: @unchecked Sendable {
                 NSLog("Redline: audio conversion failed: \(error)")
             }
         } else if out.frameLength > 0 {
+            // While Chatty speaks, its voice is replaced by silence (not dropped) so it is never transcribed.
+            let listening = gate.isListening()
+            if !listening { Self.silence(out) }
             let start = fedSeconds
             continuation.yield(AnalyzerInput(buffer: out))
             fedSeconds += Double(out.frameLength) / outFormat.sampleRate
-            if let channel = buffer.floatChannelData?[0] {
-                let level = SilenceDetector.level(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
-                let duration = Double(buffer.frameLength) / buffer.format.sampleRate
-                if let end = detector.feed(level: level, at: start, duration: duration) { onUtteranceEnd(end) }
+            if listening {
+                wasListening = true
+                if let channel = buffer.floatChannelData?[0] {
+                    let level = SilenceDetector.level(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
+                    let duration = Double(buffer.frameLength) / buffer.format.sampleRate
+                    if let end = detector.feed(level: level, at: start, duration: duration) { onUtteranceEnd(end) }
+                }
+            } else if wasListening {
+                // Gate just closed: end any speech in progress, without feeding fake levels that would wreck the noise floor.
+                wasListening = false
+                if let end = detector.interrupt(at: start) { onUtteranceEnd(end) }
             }
         }
     }
@@ -71,6 +93,8 @@ enum SpeechServiceError: LocalizedError {
 @MainActor
 final class SpeechService: SessionService {
     var onPartial: (@MainActor (String) -> Void)?
+    /// Closed by VoiceService while Chatty speaks, so Redline's own voice isn't transcribed.
+    let gate = MicGate()
 
     private let engine = AVAudioEngine()
     private var analyzer: SpeechAnalyzer?
@@ -133,7 +157,7 @@ final class SpeechService: SessionService {
             let inFormat = input.outputFormat(forBus: 0)
             // Finalize as soon as the speaker pauses: on its own the recognizer waited 4–10 s.
             let finalizer = AnalyzerBox(analyzer)
-            guard let pipe = AudioPipe(from: inFormat, to: format, continuation: continuation, onUtteranceEnd: { end in
+            guard let pipe = AudioPipe(from: inFormat, to: format, continuation: continuation, gate: gate, onUtteranceEnd: { end in
                 Task { await finalizer.finalize(through: end + 0.15) }
             }) else {
                 throw SpeechServiceError.converterUnavailable

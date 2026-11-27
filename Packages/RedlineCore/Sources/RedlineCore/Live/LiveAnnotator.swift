@@ -9,6 +9,10 @@ private let liveLog = Logger(subsystem: "com.dmschellaz.redline", category: "liv
 /// - At most one request is in flight. A sentence that finishes meanwhile is queued; a newer one replaces it
 ///   (newest wins). When the in-flight request finishes its marks are still drawn, then the queued one is sent.
 /// - A timeout or any error drops the result and sets status `.offline`. Live marks never block the session.
+/// - Chatty mode (session mode `.chatty`) sends the same request with the Chatty prompt and schema. Then
+///   `ChattyConversation` decides what to say aloud (`onSpeak`) and whether to open a question (`onQuestion`).
+///   The open question closes on `answerQuestion`, `skipQuestion`, the reviewer's next sentence, `questionTimeout`
+///   or `stop`, and each close is logged as `.questionAnswered`.
 @MainActor
 public final class LiveAnnotator: SessionService, TimelineObserving, TokenReporting {
     /// Called with each non-empty batch of AI marks (global points), on the main actor.
@@ -18,12 +22,18 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
     public var onResult: ((_ sentenceID: UUID, _ frame: LiveFrame?, _ marks: [Annotation]) -> Void)?
     /// Called whenever `status` changes.
     public var onStatus: ((LiveStatus) -> Void)?
+    /// Chatty: a line to read aloud (a short remark, or an open question's text). Main actor.
+    public var onSpeak: ((String) -> Void)?
+    /// Chatty: the question that just opened, or nil once it is answered, skipped or timed out. Main actor.
+    public var onQuestion: ((ChattyConversation.Question?) -> Void)?
 
     public private(set) var status: LiveStatus = .idle {
         didSet { if status != oldValue { onStatus?(status) } }
     }
     public private(set) var tokensUsed = TokenUsage()
     public private(set) var modelUsed: String?
+    /// Chatty: the question waiting for an answer, if any.
+    public var openQuestion: ChattyConversation.Question? { conversation.open }
 
     /// Sentences kept as context for the next request.
     static let contextSentences = 3
@@ -36,6 +46,8 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
         var recent: [String]
         var clicks: [(point: CGPoint, displayID: UInt32)]
         var url: String?
+        /// Chatty: the question this sentence answers.
+        var answering: String?
     }
 
     private struct TimedOut: Error {}
@@ -44,6 +56,7 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
     private var model: String
     private let frame: @MainActor (_ t: Double) async -> LiveFrame?
     private let timeout: Duration
+    private let questionTimeout: Duration
 
     private var context: SessionContext?
     private var recent: [String] = []
@@ -51,16 +64,20 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
     private var url: String?
     private var inFlight: Task<Void, Never>?
     private var queued: Job?
+    private var conversation = ChattyConversation()
+    /// Skips the open question after `questionTimeout`.
+    private var expiry: Task<Void, Never>?
     /// Bumped on start and stop so late results from an earlier session are ignored.
     private var generation = 0
 
     public init(llm: (any LLMClient)?, model: String,
                 frame: @escaping @MainActor (_ t: Double) async -> LiveFrame?,
-                timeout: Duration = .seconds(8)) {
+                timeout: Duration = .seconds(8), questionTimeout: Duration = .seconds(20)) {
         self.llm = llm
         self.model = model
         self.frame = frame
         self.timeout = timeout
+        self.questionTimeout = questionTimeout
     }
 
     /// Changes the client and model for the next session (the API key or Settings may change between sessions).
@@ -81,22 +98,45 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
     public func stop() async {
         generation += 1
         inFlight?.cancel()
+        if let open = conversation.open { closeQuestion(open.id, answer: "", via: .skipped) }   // ends with the session
         resetSession()
         status = .idle
     }
 
+    /// Chatty: the reviewer clicked an option in the island. Ignored unless `id` is the open question.
+    public func answerQuestion(_ id: UUID, _ option: String) {
+        closeQuestion(id, answer: option, via: .click)
+    }
+
+    /// Chatty: the reviewer clicked Skip. Ignored unless `id` is the open question.
+    public func skipQuestion(_ id: UUID) {
+        closeQuestion(id, answer: "", via: .skipped)
+    }
+
     public func observe(_ event: TimelineEvent) {
-        guard context != nil else { return }
+        guard let context else { return }
         switch event {
         case let .sentence(id, text, start, end):
-            let job = Job(sentenceID: id, text: text, start: start, end: end, recent: recent, clicks: clicks, url: url)
+            var answering: String?
+            if context.mode == .chatty, let answered = conversation.voiceAnswer(text: text, start: start, at: end) {
+                expiry?.cancel()
+                expiry = nil
+                context.emit(answered.event)
+                onQuestion?(nil)
+                answering = answered.question.text
+            }
+            var job = Job(sentenceID: id, text: text, start: start, end: end, recent: recent, clicks: clicks, url: url,
+                          answering: answering)
             recent.append(text)
             if recent.count > Self.contextSentences { recent.removeFirst(recent.count - Self.contextSentences) }
             clicks = []
             if inFlight == nil {
                 send(job)
             } else {
-                if let skipped = queued { onResult?(skipped.sentenceID, nil, []) }   // newest wins
+                if let skipped = queued {   // newest wins, but a voice answer it carried is not lost
+                    onResult?(skipped.sentenceID, nil, [])
+                    job.answering = job.answering ?? skipped.answering
+                }
                 queued = job
             }
         case let .click(point, displayID, _):
@@ -117,6 +157,30 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
         recent = []
         clicks = []
         url = nil
+        conversation.reset()
+        expiry?.cancel()
+        expiry = nil
+    }
+
+    private func closeQuestion(_ id: UUID, answer: String, via: AnswerVia) {
+        guard let context, let event = conversation.answer(id, answer, via: via, at: context.clock.now()) else { return }
+        expiry?.cancel()
+        expiry = nil
+        context.emit(event)
+        onQuestion?(nil)
+    }
+
+    private func scheduleExpiry(of id: UUID, gen: Int) {
+        expiry?.cancel()
+        let wait = questionTimeout
+        expiry = Task { [weak self] in
+            try? await Task.sleep(for: wait)
+            guard !Task.isCancelled, let self, gen == self.generation, let context = self.context,
+                  let event = self.conversation.expire(id, at: context.clock.now()) else { return }
+            self.expiry = nil
+            context.emit(event)
+            self.onQuestion?(nil)
+        }
     }
 
     private func send(_ job: Job) {
@@ -145,9 +209,11 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
         saveFrame(frame, folder: context.folder)
         seenFrame = frame
         let began = ContinuousClock.now
+        let chatty = context.mode == .chatty
         let clicks = job.clicks.filter { $0.displayID == frame.display.id }.map(\.point)
         let request = AnnotateRequest.make(model: model, frame: frame, sentence: job.text,
-                                           recentSentences: job.recent, clicks: clicks, url: job.url)
+                                           recentSentences: job.recent, clicks: clicks, url: job.url,
+                                           chatty: chatty, answering: job.answering)
         status = .working
         do {
             let response = try await Self.send(request, via: llm, timeout: timeout)
@@ -156,15 +222,29 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
                                                  output: response.usage?.output_tokens ?? 0)
             modelUsed = response.model ?? model
             guard let text = response.firstText() else { throw ClaudeError.noText }
-            let marks = try AnnotateRequest.parse(text, frame: frame, createdAt: job.end)
+            let answer = try AnnotateRequest.parseAnswer(text, frame: frame, createdAt: job.end)
+            let marks = answer.marks
             let elapsed = ContinuousClock.now - began
             liveLog.info("Sentence [\(job.start, format: .fixed(precision: 1))–\(job.end, format: .fixed(precision: 1))] frame t=\(frame.t, format: .fixed(precision: 1)) display \(frame.display.id): \(marks.count) mark(s) in \(elapsed, privacy: .public)")
             if marks.isEmpty { liveLog.info("No marks; model said: \(String(text.prefix(400)), privacy: .public)") }
             status = .ok
             seenMarks = marks
-            guard !marks.isEmpty else { return }
-            context.emit(.aiAnnotation(sentenceID: job.sentenceID, annotations: marks, say: nil))
-            onMarks?(marks)
+            let outcome = chatty
+                ? conversation.respond(say: answer.say,
+                                       question: queued == nil ? answer.question : nil,   // stale: reviewer moved on
+                                       sentenceID: job.sentenceID,
+                                       at: context.clock.now())
+                : ChattyConversation.Outcome()
+            if !marks.isEmpty {
+                context.emit(.aiAnnotation(sentenceID: job.sentenceID, annotations: marks, say: outcome.said))
+                onMarks?(marks)
+            }
+            if let question = outcome.asked {
+                context.emit(question.event)
+                onQuestion?(question)
+                scheduleExpiry(of: question.id, gen: gen)
+            }
+            if let line = outcome.speak { onSpeak?(line) }
         } catch {
             guard gen == generation else { return }
             liveLog.error("Live request failed: \(String(describing: error), privacy: .public)")

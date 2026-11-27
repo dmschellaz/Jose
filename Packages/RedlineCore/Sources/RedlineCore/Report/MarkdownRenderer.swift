@@ -18,10 +18,21 @@ public enum TranscriptBuilder {
             case let .urlChanged(url, _, t): return TranscriptLine(t: t, text: "(opened \(FallbackReport.pathOf(url)))")
             case let .momentMarked(t): return TranscriptLine(t: t, text: "(marked moment)")
             case let .userMark(a): return TranscriptLine(t: a.createdAt, text: "(drew on screen)")
-            case let .aiAnnotation(_, anns, _):
+            case let .aiAnnotation(_, anns, say):
                 guard !anns.isEmpty else { return nil }
                 let captions = FallbackReport.quotedCaptions(anns)
-                return TranscriptLine(t: e.time, text: captions.isEmpty ? "(AI marked the screen)" : "(AI marked \(captions))")
+                var text = captions.isEmpty ? "(AI marked the screen" : "(AI marked \(captions)"
+                if let say, !say.isEmpty { text += " and said \"\(say)\"" }
+                return TranscriptLine(t: e.time, text: text + ")")
+            case let .aiQuestion(_, _, text, options, t):
+                let choices = options.map { "\"\($0)\"" }.joined(separator: ", ")
+                return TranscriptLine(t: t, text: "(AI asked \"\(text)\", options: \(choices))")
+            case let .questionAnswered(_, answer, via, t):
+                switch via {
+                case .click: return TranscriptLine(t: t, text: "(picked \"\(answer)\")")
+                case .voice: return nil   // the answer is the reviewer's next sentence, already listed
+                case .skipped: return TranscriptLine(t: t, text: "(question skipped)")
+                }
             case .keyframe: return nil
             }
         }
@@ -38,9 +49,12 @@ public struct ReportContext: Sendable {
     /// Keyed by 0-based item index.
     public var imageFiles: [Int: String]
     public var timeZone: TimeZone
+    /// Chatty questions behind each item, keyed by 0-based item index. Only answered ones are rendered.
+    public var clarifications: [Int: [Clarification]]
 
     public init(appName: String, startURL: String?, startedAt: Date, duration: Double, mode: SessionMode,
-                transcript: [TranscriptLine], imageFiles: [Int: String], timeZone: TimeZone = .current) {
+                transcript: [TranscriptLine], imageFiles: [Int: String], timeZone: TimeZone = .current,
+                clarifications: [Int: [Clarification]] = [:]) {
         self.appName = appName
         self.startURL = startURL
         self.startedAt = startedAt
@@ -49,6 +63,7 @@ public struct ReportContext: Sendable {
         self.transcript = transcript
         self.imageFiles = imageFiles
         self.timeZone = timeZone
+        self.clarifications = clarifications
     }
 }
 
@@ -75,6 +90,9 @@ public enum MarkdownRenderer {
             line("Problem", item.problem)
             line("Wanted", item.wanted)
             line("You said", item.quote.isEmpty ? "" : "\"\(item.quote)\"")
+            for c in context.clarifications[i] ?? [] {
+                if c.isAnswered, let answer = c.answer { line("Clarified", "\(c.question) → \(answer)") }
+            }
             if let file = context.imageFiles[i] {
                 out += "- **Screenshot:** ![](\(file))" + (item.imageCaption.isEmpty ? "" : " — \(item.imageCaption)") + "\n"
             }

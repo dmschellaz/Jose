@@ -42,6 +42,9 @@ enum SystemAudio {
         }
     }
 
+    /// True while a mute set by muteOutput() is in place (VoiceService lifts it only then).
+    static var isMutedByRedline: Bool { UserDefaults.standard.dictionary(forKey: savedKey) != nil }
+
     // MARK: - CoreAudio helpers
 
     private static func save(device: AudioDeviceID, kind: String, value: Float) {

@@ -52,4 +52,28 @@ private func run(_ d: inout SilenceDetector, _ spans: [(Double, Double)]) -> [Do
         full.withUnsafeBufferPointer { #expect(abs(SilenceDetector.level($0)) < 0.001) }
         silent.withUnsafeBufferPointer { #expect(SilenceDetector.level($0) == -120) }
     }
+
+    @Test func interruptEndsSpeechInProgress() {
+        var d = SilenceDetector()
+        _ = run(&d, [(-65, 1), (-25, 2)])
+        #expect(d.isInSpeech)
+        let end = d.interrupt(at: 3.0)
+        #expect(end != nil && abs(end! - 3.0) < 0.1)
+        #expect(!d.isInSpeech)
+    }
+
+    @Test func interruptWhenIdleReturnsNil() {
+        var d = SilenceDetector()
+        _ = run(&d, [(-65, 1)])
+        #expect(d.interrupt(at: 1) == nil)
+    }
+
+    @Test func interruptKeepsTheLearnedNoiseFloor() {
+        var d = SilenceDetector()
+        _ = run(&d, [(-40, 2)])
+        _ = d.interrupt(at: 2)
+        // Against the learned -40 floor, -38 is not voice (a fresh detector's -55 minimum would say it is).
+        #expect(d.feed(level: -38, at: 2, duration: 0.085) == nil)
+        #expect(!d.isInSpeech)
+    }
 }

@@ -20,12 +20,11 @@ struct MenuContent: View {
         }
         Picker("Mode", selection: Bindable(model.settings).sessionMode) {
             ForEach(AppSettings.availableModes, id: \.self) { Text($0.title).tag($0) }
-            Text("Chatty (coming soon)").tag(SessionMode.chatty).disabled(true).selectionDisabled()
         }
         .pickerStyle(.inline)
         .disabled(model.isRecording || model.isStarting || model.isFinalizing || model.isReviewing)
-        if model.settings.sessionMode == .live && !model.settings.hasAPIKey {
-            Text("Live needs a Claude API key. Add one in Settings.")
+        if model.settings.sessionMode != .manual && !model.settings.hasAPIKey {
+            Text("\(model.settings.sessionMode.title) needs a Claude API key. Add one in Settings.")
         }
         Divider()
         Menu("Recent Sessions") {

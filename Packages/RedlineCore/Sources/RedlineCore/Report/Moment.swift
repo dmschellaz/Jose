@@ -7,6 +7,30 @@ public struct SentenceRef: Codable, Equatable, Sendable {
     public var end: Double
 }
 
+/// A clarifying question the live AI asked in Chatty mode, and how it was answered.
+public struct Clarification: Codable, Equatable, Sendable {
+    public var questionID: UUID
+    public var question: String
+    public var options: [String]
+    /// The option clicked or the sentence said. nil when skipped or never answered.
+    public var answer: String?
+    /// nil when the question was never closed (e.g. a crashed session).
+    public var via: AnswerVia?
+    /// When it was asked (seconds since session start).
+    public var t: Double
+
+    public var isAnswered: Bool { via == .click || via == .voice }
+
+    public init(questionID: UUID, question: String, options: [String], answer: String? = nil, via: AnswerVia? = nil, t: Double) {
+        self.questionID = questionID
+        self.question = question
+        self.options = options
+        self.answer = answer
+        self.via = via
+        self.t = t
+    }
+}
+
 public struct Moment: Codable, Equatable, Sendable {
     public var id: Int
     public var start: Double
@@ -17,6 +41,8 @@ public struct Moment: Codable, Equatable, Sendable {
     public var aiMarks: [Annotation] = []
     public var clickTimes: [Double] = []
     public var keyframe: KeyframeRef?
+    /// Chatty questions about this moment's sentences, in the order asked.
+    public var clarifications: [Clarification] = []
 
     public var text: String { sentences.map(\.text).joined(separator: " ") }
 
@@ -70,12 +96,16 @@ public enum MomentSegmenter {
         }
         guard !moments.isEmpty else { return [] }
 
-        // 3. Attach marks and clicks to the nearest moment.
+        // 3. Attach marks, clicks and questions to their moment.
         func nearest(_ t: Double) -> Int {
             moments.indices.min { distance(t, moments[$0]) < distance(t, moments[$1]) }!
         }
+        func owner(of sentenceID: UUID) -> Int? {
+            moments.firstIndex { $0.sentences.contains { $0.id == sentenceID } }
+        }
         var urls: [(url: String, t: Double)] = []
         var keyframes: [KeyframeRef] = []
+        var answers: [UUID: (answer: String, via: AnswerVia)] = [:]
         for e in sorted {
             switch e {
             case let .userMark(a):
@@ -83,10 +113,15 @@ public enum MomentSegmenter {
                 moments[i].userMarks.append(a)
             case let .aiAnnotation(sentenceID, anns, _):
                 // The AI answers one sentence; its marks belong to that sentence's moment.
-                let owner = moments.firstIndex { $0.sentences.contains { $0.id == sentenceID } }
+                let o = owner(of: sentenceID)
                 for a in anns {
-                    moments[owner ?? nearest(a.createdAt)].aiMarks.append(a)
+                    moments[o ?? nearest(a.createdAt)].aiMarks.append(a)
                 }
+            case let .aiQuestion(id, sentenceID, text, options, t):
+                moments[owner(of: sentenceID) ?? nearest(t)].clarifications.append(
+                    Clarification(questionID: id, question: text, options: options, t: t))
+            case let .questionAnswered(id, answer, via, _):
+                answers[id] = (answer, via)
             case let .click(_, _, t):
                 let i = nearest(t)
                 moments[i].clickTimes.append(t)
@@ -96,10 +131,15 @@ public enum MomentSegmenter {
             }
         }
 
-        // 4. URL and keyframe per moment.
+        // 4. URL, keyframe and answers per moment.
         for i in moments.indices {
             moments[i].url = urls.last(where: { $0.t <= moments[i].start + 1 })?.url ?? urls.first?.url
             moments[i].keyframe = KeyframeSelector.select(for: moments[i], from: keyframes)
+            for j in moments[i].clarifications.indices {
+                guard let a = answers[moments[i].clarifications[j].questionID] else { continue }
+                moments[i].clarifications[j].via = a.via
+                moments[i].clarifications[j].answer = a.via == .skipped ? nil : a.answer
+            }
         }
         return moments
     }

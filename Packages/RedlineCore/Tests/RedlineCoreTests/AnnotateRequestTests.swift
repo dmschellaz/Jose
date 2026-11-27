@@ -153,3 +153,94 @@ private func near(_ a: CGRect, _ b: CGRect) -> Bool {
         }
     }
 }
+
+@Suite struct ChattyAnnotateRequestTests {
+    @Test func chattyRequestAddsSayAndQuestion() throws {
+        let req = AnnotateRequest.make(model: "claude-haiku-5-5", frame: liveTestFrame(), sentence: "make it bigger",
+                                       recentSentences: [], clicks: [], url: nil, chatty: true)
+        let body = try json(req)
+        #expect(body["tool_choice"] == nil)
+        #expect(body["temperature"] == nil)
+        let system = try #require(body["system"] as? String)
+        #expect(system.hasPrefix(AnnotateRequest.systemPrompt))
+        #expect(system.hasSuffix(AnnotateRequest.chattyPrompt))
+        let oc = try #require(body["output_config"] as? [String: Any])
+        #expect(oc["effort"] as? String == "low")
+        let format = try #require(oc["format"] as? [String: Any])
+        let schema = try #require(format["schema"] as? [String: Any])
+        let props = try #require(schema["properties"] as? [String: Any])
+        #expect(Set(props.keys) == ["marks", "say", "question"])
+        #expect(Set(schema["required"] as? [String] ?? []) == ["marks", "say", "question"])
+        #expect(schema["additionalProperties"] as? Bool == false)
+        let question = try #require(props["question"] as? [String: Any])
+        #expect(Set(question["required"] as? [String] ?? []) == ["text", "options"])
+        #expect(question["additionalProperties"] as? Bool == false)
+    }
+
+    @Test func liveRequestKeepsTheLiveSchemaAndPrompt() {
+        let req = AnnotateRequest.make(model: "claude-haiku-5-5", frame: liveTestFrame(), sentence: "x",
+                                       recentSentences: [], clicks: [], url: nil)
+        #expect(req.system == AnnotateRequest.systemPrompt)
+        #expect(req.output_config?.format?.schema == AnnotateRequest.schema)
+        guard case let .object(root) = AnnotateRequest.schema, case let .object(props)? = root["properties"] else {
+            Issue.record("bad schema"); return
+        }
+        #expect(Set(props.keys) == ["marks"])
+    }
+
+    @Test func answeringSentenceCarriesTheQuestion() {
+        func text(_ req: MessagesRequest) -> String {
+            req.messages[0].content.compactMap { if case let .text(s) = $0 { s } else { nil } }.joined()
+        }
+        let answering = AnnotateRequest.make(model: "claude-haiku-5-5", frame: liveTestFrame(), sentence: "the billing one",
+                                             recentSentences: [], clicks: [], url: nil, chatty: true, answering: "Which card?")
+        #expect(text(answering).contains("You asked: Which card?"))
+        #expect(text(answering).contains("Reviewer just said: the billing one"))
+        let plain = AnnotateRequest.make(model: "claude-haiku-5-5", frame: liveTestFrame(), sentence: "the billing one",
+                                         recentSentences: [], clicks: [], url: nil, chatty: true)
+        #expect(!text(plain).contains("You asked"))
+    }
+
+    @Test func parseAnswerReadsSayAndQuestion() throws {
+        let text = #"{"marks":[{"shape":"rect","x":10,"y":10,"w":100,"h":50,"caption":"Save"}],"say":" I marked the left card. ","question":{"text":" Which card? ","options":["Billing card"," Profile card "]}}"#
+        let a = try AnnotateRequest.parseAnswer(text, frame: liveTestFrame(), createdAt: 2)
+        #expect(a.marks.count == 1)
+        #expect(a.marks.first?.caption == "Save")
+        #expect(a.say == "I marked the left card.")
+        #expect(a.question == LiveQuestion(text: "Which card?", options: ["Billing card", "Profile card"]))
+    }
+
+    @Test func parseAnswerCapsWordsAndOptions() throws {
+        let text = #"{"marks":[],"say":"one two three four five six seven eight nine ten eleven twelve thirteen","question":{"text":"Which card?","options":["Billing card","The profile card on the right","billing CARD","Team card","Usage card"]}}"#
+        let a = try AnnotateRequest.parseAnswer(text, frame: liveTestFrame(), createdAt: 0)
+        #expect(a.say == "one two three four five six seven eight nine ten eleven twelve")
+        #expect(a.question?.options == ["Billing card", "The profile card on", "Team card"])
+    }
+
+    @Test func parseAnswerCapsQuestionTextToOneShortLine() throws {
+        let text = #"{"marks":[],"say":"","question":{"text":"one two three four five\nsix seven eight nine ten eleven twelve thirteen","options":["A","B"]}}"#
+        let a = try AnnotateRequest.parseAnswer(text, frame: liveTestFrame(), createdAt: 0)
+        #expect(a.question?.text == "one two three four five six seven eight nine ten eleven twelve")
+    }
+
+    @Test func chattyPromptDoesNotDescribeTheMark() {
+        #expect(!AnnotateRequest.chattyPrompt.contains("I marked the left card"))
+        #expect(AnnotateRequest.chattyPrompt.contains("Did you mean the left card?"))
+    }
+
+    @Test func parseAnswerDropsQuestionsWithoutTwoOptions() throws {
+        func question(_ q: String) throws -> LiveQuestion? {
+            try AnnotateRequest.parseAnswer(#"{"marks":[],"say":"","question":"# + q + "}", frame: liveTestFrame(), createdAt: 0).question
+        }
+        #expect(try question(#"{"text":"","options":[]}"#) == nil)
+        #expect(try question(#"{"text":"Which?","options":["Only one"]}"#) == nil)
+        #expect(try question(#"{"text":"Which?","options":["A"," ","a"]}"#) == nil)
+        #expect(try question(#"{"text":"  ","options":["A","B"]}"#) == nil)
+        #expect(try question(#"{"text":"Which?","options":["A","B"]}"#) == LiveQuestion(text: "Which?", options: ["A", "B"]))
+    }
+
+    @Test func liveAnswerHasNoChattyFields() throws {
+        let a = try AnnotateRequest.parseAnswer(#"{"marks":[]}"#, frame: liveTestFrame(), createdAt: 0)
+        #expect(a == LiveAnswer(marks: [], say: "", question: nil))
+    }
+}
