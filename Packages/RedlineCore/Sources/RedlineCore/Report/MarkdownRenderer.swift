@@ -49,9 +49,12 @@ public struct ReportContext: Sendable {
     /// Keyed by 0-based item index.
     public var imageFiles: [Int: String]
     public var timeZone: TimeZone
+    /// Chatty questions behind each item, keyed by 0-based item index. Only answered ones are rendered.
+    public var clarifications: [Int: [Clarification]]
 
     public init(appName: String, startURL: String?, startedAt: Date, duration: Double, mode: SessionMode,
-                transcript: [TranscriptLine], imageFiles: [Int: String], timeZone: TimeZone = .current) {
+                transcript: [TranscriptLine], imageFiles: [Int: String], timeZone: TimeZone = .current,
+                clarifications: [Int: [Clarification]] = [:]) {
         self.appName = appName
         self.startURL = startURL
         self.startedAt = startedAt
@@ -60,6 +63,7 @@ public struct ReportContext: Sendable {
         self.transcript = transcript
         self.imageFiles = imageFiles
         self.timeZone = timeZone
+        self.clarifications = clarifications
     }
 }
 
@@ -86,6 +90,9 @@ public enum MarkdownRenderer {
             line("Problem", item.problem)
             line("Wanted", item.wanted)
             line("You said", item.quote.isEmpty ? "" : "\"\(item.quote)\"")
+            for c in context.clarifications[i] ?? [] {
+                if c.isAnswered, let answer = c.answer { line("Clarified", "\(c.question) → \(answer)") }
+            }
             if let file = context.imageFiles[i] {
                 out += "- **Screenshot:** ![](\(file))" + (item.imageCaption.isEmpty ? "" : " — \(item.imageCaption)") + "\n"
             }

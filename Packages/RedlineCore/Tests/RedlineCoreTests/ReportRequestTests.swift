@@ -55,3 +55,26 @@ private func headers(_ request: MessagesRequest) -> [String] {
     #expect(ReportRequest.make(model: "claude-haiku-5-5", input: input).fallbacks == nil)
     #expect(ReportRequest.make(model: "claude-sonnet-5-5", input: input).fallbacks == "default")
 }
+
+@Test func momentTextCarriesQuestionsAndAnswers() {
+    var m = Moment(id: 1, start: 0, end: 2, sentences: [SentenceRef(id: UUID(), text: "make it bigger", start: 0, end: 2)])
+    m.clarifications = [
+        Clarification(questionID: UUID(), question: "Which button?", options: ["Save", "Cancel"], answer: "Save", via: .click, t: 3),
+        Clarification(questionID: UUID(), question: "Text or button?", options: ["Text", "Button"], answer: nil, via: .skipped, t: 9),
+    ]
+    let req = ReportRequest.make(model: "m", input: ReportInput(moments: [m], images: [:], transcript: [], startURL: nil))
+    let text = req.messages[0].content.compactMap { block -> String? in
+        if case let .text(t) = block, t.hasPrefix("Moment 1") { t } else { nil }
+    }.first
+    #expect(text == """
+    Moment 1 [00:00–00:02] on unknown page
+    Reviewer said: make it bigger
+    AI asked: "Which button?" Reviewer answered: "Save"
+    AI asked: "Text or button?" (not answered)
+    """)
+}
+
+@Test func systemPromptTreatsAnswersAsTheReviewersWords() {
+    #expect(ReportRequest.systemPrompt.contains("clarifying question the live AI asked"))
+    #expect(ReportRequest.systemPrompt.contains("The answer is the reviewer's own words"))
+}

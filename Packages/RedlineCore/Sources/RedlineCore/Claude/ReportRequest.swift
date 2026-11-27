@@ -25,6 +25,10 @@ public enum ReportRequest {
     Blue marks with short labels are a live AI's guesses at what the reviewer meant, made while they talked. \
     Use the blue marks as hints, but trust the reviewer's words and red marks over them.
 
+    Some moments also show a clarifying question the live AI asked while the reviewer talked, and the reviewer's \
+    answer. The answer is the reviewer's own words: treat it like anything else they said, and prefer it over the \
+    AI's guesses.
+
     - Merge moments that are about the same issue. Drop moments with no feedback in them (thinking aloud, \
     "ok, next page").
     - title: at most 8 words naming the change.
@@ -70,7 +74,9 @@ public enum ReportRequest {
                 + " on \(m.url ?? "unknown page")"
                 + (m.userMarks.isEmpty ? "" : " (reviewer drew \(m.userMarks.count) mark(s))")
                 + aiMarksNote(m.aiMarks)
-            blocks.append(.text("\(header)\nReviewer said: \(m.text.isEmpty ? "(nothing)" : m.text)"))
+            var said = "\(header)\nReviewer said: \(m.text.isEmpty ? "(nothing)" : m.text)"
+            for c in m.clarifications { said += "\n" + clarificationLine(c) }
+            blocks.append(.text(said))
             if let jpeg = input.images[m.id] { blocks.append(.jpeg(jpeg)) }
         }
         let transcript = input.transcript.map { "[\(MarkdownRenderer.timestamp($0.t))] \($0.text)" }.joined(separator: "\n")
@@ -84,6 +90,13 @@ public enum ReportRequest {
             output_config: .init(effort: "medium", format: .init(schema: schema)),
             // Haiku has no server-side refusal fallback; asking for one is an error.
             fallbacks: model.hasPrefix("claude-haiku") ? nil : "default")
+    }
+
+    /// `AI asked: "Which card?" Reviewer answered: "Billing"`, or `AI asked: "Which card?" (not answered)`.
+    static func clarificationLine(_ c: Clarification) -> String {
+        let asked = "AI asked: \"\(c.question)\""
+        guard c.isAnswered, let answer = c.answer else { return asked + " (not answered)" }
+        return asked + " Reviewer answered: \"\(answer)\""
     }
 
     /// ` (live AI marked: "Billing card", "Save button")`, or "" when the AI drew nothing.

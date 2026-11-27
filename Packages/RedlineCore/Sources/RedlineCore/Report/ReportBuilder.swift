@@ -106,9 +106,16 @@ public struct ReportBuilder: ReportBuilding {
         } else {
             duration = document.events.map(\.time).filter(\.isFinite).max() ?? 0
         }
+        let momentsByID = Dictionary(uniqueKeysWithValues: moments.map { ($0.id, $0) })
+        var clarifications: [Int: [Clarification]] = [:]
+        for (i, item) in items.enumerated() {
+            let answered = item.momentIDs.compactMap { momentsByID[$0] }.flatMap(\.clarifications).filter(\.isAnswered)
+            if !answered.isEmpty { clarifications[i] = answered }
+        }
         let context = ReportContext(appName: SessionFolder.slug(fromURL: startURL), startURL: startURL,
                                     startedAt: document.metadata.startedAt, duration: duration, mode: document.metadata.mode,
-                                    transcript: transcript, imageFiles: imageFiles, timeZone: timeZone)
+                                    transcript: transcript, imageFiles: imageFiles, timeZone: timeZone,
+                                    clarifications: clarifications)
         let markdown = MarkdownRenderer.render(items: items, context: context)
         do {
             try markdown.write(to: folder.feedbackURL, atomically: true, encoding: .utf8)

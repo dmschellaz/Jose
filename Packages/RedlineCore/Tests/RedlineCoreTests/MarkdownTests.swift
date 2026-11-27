@@ -159,3 +159,17 @@ private let item = FeedbackItem(title: "Billing card padding is too tight", mome
     ])
     #expect(lines.map(\.t) == [1, 2, 3, 5])
 }
+
+@Test func rendersClarifiedLinesForAnsweredQuestions() {
+    let ctx = ReportContext(appName: "app", startURL: nil, startedAt: Date(timeIntervalSince1970: 0), duration: 5,
+                            mode: .chatty, transcript: [], imageFiles: [:], timeZone: .gmt,
+                            clarifications: [0: [
+                                Clarification(questionID: UUID(), question: "Which card?", options: ["Billing", "Profile"],
+                                              answer: "Billing", via: .click, t: 3),
+                                Clarification(questionID: UUID(), question: "Ignored?", options: ["Yes", "No"],
+                                              answer: nil, via: .skipped, t: 4),
+                            ]])
+    let md = MarkdownRenderer.render(items: [item], context: ctx)
+    #expect(md.contains("- **You said:** \"this card feels really cramped\"\n- **Clarified:** Which card? → Billing\n"))
+    #expect(!md.contains("Ignored?"))
+}
