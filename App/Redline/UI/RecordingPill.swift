@@ -83,6 +83,8 @@ private enum Island {
     static let rowsWhileRecording = 3
     static let rowsInReview = 5
     static let footerHeight: CGFloat = 44
+    /// Chatty's question bar: the question on one line, its answer buttons under it.
+    static let questionHeight: CGFloat = 58
     static let flare: CGFloat = 10      // concave "ears" where the island meets the top edge
     static let cornerRadius: CGFloat = 22
 }
@@ -126,11 +128,17 @@ private struct IslandView: View {
         }
     }
 
+    /// Chatty's open question, shown only while recording.
+    private var question: ChattyConversation.Question? {
+        model.isRecording ? model.openQuestion : nil
+    }
+
     private var contentHeight: CGFloat {
         var h = Island.contentHeight
         if case let .done(result) = model.controller.state, result.liveModel != nil { h += Island.extraLineHeight }
         h += CGFloat(visibleRows) * Island.rowHeight
         if model.isReviewing { h += Island.footerHeight }
+        if question != nil { h += Island.questionHeight }
         return h
     }
 
@@ -152,6 +160,9 @@ private struct IslandView: View {
         VStack(spacing: 0) {
             IslandContent(model: model, close: close)
                 .frame(height: headerHeight)
+            if let question {
+                QuestionBar(question: question, model: model)
+            }
             if visibleRows > 0 || model.isReviewing {
                 FeedList(model: model, visibleRows: visibleRows)
             }
@@ -172,6 +183,7 @@ private struct IslandView: View {
             .opacity(presence.shown ? 1 : 0)
             .animation(.spring(response: 0.4, dampingFraction: 0.75), value: presence.shown)
             .animation(.snappy, value: model.controller.state)
+            .animation(.snappy, value: model.openQuestion)
     }
 }
 
@@ -195,11 +207,15 @@ private struct IslandContent: View {
                         }
                         .font(.system(size: 13)).foregroundStyle(.secondary)
                         if mode != .manual { Text(mode.title).font(.system(size: 11)).foregroundStyle(.secondary) }
-                        if mode == .live { LiveStatusBadge(status: model.liveStatus) }
+                        if mode != .manual { LiveStatusBadge(status: model.liveStatus) }
                     }
                     Group {
                         if !model.partialTranscript.isEmpty {
                             Text(model.partialTranscript).foregroundStyle(.secondary)
+                        } else if model.isSpeaking {
+                            Text("Speaking…").foregroundStyle(Color(cgColor: Palette.ai))
+                        } else if model.openQuestion != nil {
+                            Text("Click an answer below, or say it.").foregroundStyle(Color(cgColor: Palette.ai))
                         } else if model.feed.isWaiting {
                             Text("Marking it up…").foregroundStyle(.red)
                         } else {
@@ -210,6 +226,10 @@ private struct IslandContent: View {
                     .font(.system(size: 12)).lineLimit(1).truncationMode(.head)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                if model.isSpeaking {
+                    Button("Stop talking") { model.stopTalking() }
+                        .buttonStyle(IslandButtonStyle())
+                }
                 Button(confirmCancel ? "Discard?" : "Cancel") {
                     if confirmCancel { Task { await model.cancel() } } else {
                         confirmCancel = true
@@ -334,6 +354,34 @@ private struct PulsingDot: View {
             .opacity(pulse ? 0.35 : 1)
             .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: pulse)
             .onAppear { pulse = true }
+    }
+}
+
+/// Chatty's open question: the question, a button per answer option, and Skip. Saying the answer works too;
+/// the question closes by itself after 20 s.
+private struct QuestionBar: View {
+    let question: ChattyConversation.Question
+    let model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "questionmark.bubble.fill").foregroundStyle(Color(cgColor: Palette.ai))
+                Text(question.text).font(.system(size: 13, weight: .semibold)).lineLimit(1).truncationMode(.tail)
+            }
+            HStack(spacing: 8) {
+                ForEach(question.options, id: \.self) { option in
+                    Button(option) { model.answerQuestion(question.id, option) }
+                        .buttonStyle(IslandButtonStyle(prominent: true))
+                }
+                Button("Skip") { model.skipQuestion(question.id) }
+                    .buttonStyle(IslandButtonStyle())
+                Spacer(minLength: 0)
+            }
+        }
+        .foregroundStyle(.white)
+        .frame(maxWidth: .infinity, minHeight: Island.questionHeight, maxHeight: Island.questionHeight, alignment: .leading)
+        .help("Click an answer or say it")
     }
 }
 
