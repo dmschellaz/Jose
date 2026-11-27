@@ -18,7 +18,10 @@ final class VoiceService: NSObject, SessionService {
     private let synthesizer = AVSpeechSynthesizer()
     private let gate: MicGate
     /// Utterances handed to the synthesizer that haven't finished or been cancelled yet.
-    private var pending: Set<ObjectIdentifier> = []
+    /// The utterances are held so their addresses can't be reused while a callback for them may still arrive.
+    private var pending: [ObjectIdentifier: AVSpeechUtterance] = [:]
+    /// Cut-off utterances whose didCancel hasn't arrived yet; their callbacks are ignored.
+    private var draining: [ObjectIdentifier: AVSpeechUtterance] = [:]
     /// True when speaking lifted the session's mute, so it is put back afterwards.
     private var liftedMute = false
     private var active = false
@@ -50,8 +53,16 @@ final class VoiceService: NSObject, SessionService {
         }
         let utterance = AVSpeechUtterance(string: line)
         utterance.voice = Self.voice(voiceIdentifier)
-        pending.insert(ObjectIdentifier(utterance))
+        let id = ObjectIdentifier(utterance)
+        pending[id] = utterance
         synthesizer.speak(utterance)
+        // Watchdog: if no callback ever arrives, don't leave the mic gate closed and the mute lifted.
+        let words = Double(line.split(whereSeparator: \.isWhitespace).count)
+        let limit = max(6, words * 0.5 + 4)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(limit))
+            self?.ended(id)
+        }
     }
 
     /// "Stop talking": cuts the current line and anything queued.
@@ -83,13 +94,15 @@ final class VoiceService: NSObject, SessionService {
     }
 
     fileprivate func ended(_ id: ObjectIdentifier) {
-        guard pending.remove(id) != nil, pending.isEmpty else { return }
+        if draining.removeValue(forKey: id) != nil { return }
+        guard pending.removeValue(forKey: id) != nil, pending.isEmpty else { return }
         finish(remute: true)
     }
 
     private func cutOff(remute: Bool) {
-        pending = []
-        if synthesizer.isSpeaking { synthesizer.stopSpeaking(at: .immediate) }
+        draining.merge(pending) { old, _ in old }
+        pending = [:]
+        synthesizer.stopSpeaking(at: .immediate)
         finish(remute: remute)
     }
 
