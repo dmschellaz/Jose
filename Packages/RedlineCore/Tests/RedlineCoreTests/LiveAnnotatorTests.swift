@@ -47,19 +47,27 @@ actor GatedLLM: LLMClient {
     var marks: [[Annotation]] = []
     var statuses: [LiveStatus] = []
     var results: [(id: UUID, hadFrame: Bool, marks: Int)] = []
+    var spoken: [String] = []
+    /// Text of each question shown, nil when it closed.
+    var questions: [String?] = []
 }
 
+/// `startedAgo` moves the session clock back, so test sentences at small times start "before" a question.
 @MainActor private func makeAnnotator(_ llm: (any LLMClient)?, model: String = "claude-haiku-5-5",
-                                      timeout: Duration = .seconds(8), mode: SessionMode = .live)
+                                      timeout: Duration = .seconds(8), mode: SessionMode = .live,
+                                      questionTimeout: Duration = .seconds(20), startedAgo: Double = 0)
     async throws -> (LiveAnnotator, Sink) {
     let sink = Sink()
-    let a = LiveAnnotator(llm: llm, model: model, frame: { liveTestFrame(t: $0) }, timeout: timeout)
+    let a = LiveAnnotator(llm: llm, model: model, frame: { liveTestFrame(t: $0) }, timeout: timeout,
+                          questionTimeout: questionTimeout)
     a.onMarks = { sink.marks.append($0) }
     a.onStatus = { sink.statuses.append($0) }
     a.onResult = { id, frame, marks in sink.results.append((id, frame != nil, marks.count)) }
+    a.onSpeak = { sink.spoken.append($0) }
+    a.onQuestion = { sink.questions.append($0?.text) }
     let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
     let folder = try SessionFolder.create(root: root, slug: "live", date: Date())
-    let ctx = SessionContext(folder: folder, clock: SessionClock(startedAt: Date()), mode: mode,
+    let ctx = SessionContext(folder: folder, clock: SessionClock(startedAt: Date().addingTimeInterval(-startedAgo)), mode: mode,
                              emit: { sink.events.append($0) })
     try await a.start(context: ctx)
     return (a, sink)
@@ -201,5 +209,127 @@ private func sentence(_ text: String, at t: Double) -> TimelineEvent {
         a.observe(sentence("after stop", at: 5))
         try await Task.sleep(for: .milliseconds(20))
         #expect(await llm.count == 1)
+    }
+}
+
+private let askAnswer = #"{"marks":[{"shape":"rect","x":10,"y":10,"w":100,"h":50,"caption":"Save"}],"say":"","question":{"text":"Which button?","options":["Save","Cancel"]}}"#
+private let remarkAnswer = #"{"marks":[{"shape":"rect","x":10,"y":10,"w":100,"h":50,"caption":"Save"}],"say":"Now on billing.","question":{"text":"","options":[]}}"#
+
+/// "via:answer" for each questionAnswered event, in order.
+private func answers(_ events: [TimelineEvent]) -> [String] {
+    events.compactMap { if case let .questionAnswered(_, answer, via, _) = $0 { "\(via.rawValue):\(answer)" } else { nil } }
+}
+
+@MainActor @Suite struct ChattyAnnotatorTests {
+    @Test func questionOpensIsSpokenAndLogged() async throws {
+        let llm = GatedLLM(answer: askAnswer, autoRelease: true)
+        let (a, sink) = try await makeAnnotator(llm, mode: .chatty, startedAgo: 1000)
+        let id = UUID()
+        a.observe(.sentence(id: id, text: "make this bigger", start: 1, end: 2))
+        await waitUntil { sink.questions.count == 1 }
+        #expect(sink.questions == ["Which button?"])
+        #expect(sink.spoken == ["Which button?"])
+        #expect(a.openQuestion?.options == ["Save", "Cancel"])
+        #expect(sink.events.contains { if case let .aiQuestion(_, sid, _, _, _) = $0 { sid == id } else { false } })
+        guard case let .aiAnnotation(_, _, say)? = sink.events.first else { Issue.record("no aiAnnotation"); return }
+        #expect(say == nil)
+        let system = await llm.requests.first?.system
+        #expect(system?.contains("Chatty mode is on") == true)
+    }
+
+    @Test func clickAnswerClosesTheQuestion() async throws {
+        let (a, sink) = try await makeAnnotator(GatedLLM(answer: askAnswer, autoRelease: true), mode: .chatty, startedAgo: 1000)
+        a.observe(sentence("make this bigger", at: 1))
+        await waitUntil { sink.questions.count == 1 }
+        let q = try #require(a.openQuestion)
+        a.answerQuestion(UUID(), "Save")   // stale id: ignored
+        #expect(a.openQuestion != nil && answers(sink.events).isEmpty)
+        a.answerQuestion(q.id, "Save")
+        #expect(a.openQuestion == nil)
+        #expect(sink.questions == ["Which button?", nil])
+        #expect(answers(sink.events) == ["click:Save"])
+        a.answerQuestion(q.id, "Cancel")   // nothing open: ignored
+        #expect(answers(sink.events) == ["click:Save"])
+    }
+
+    @Test func skipClosesTheQuestion() async throws {
+        let (a, sink) = try await makeAnnotator(GatedLLM(answer: askAnswer, autoRelease: true), mode: .chatty, startedAgo: 1000)
+        a.observe(sentence("make this bigger", at: 1))
+        await waitUntil { sink.questions.count == 1 }
+        let q = try #require(a.openQuestion)
+        a.skipQuestion(q.id)
+        #expect(a.openQuestion == nil)
+        #expect(answers(sink.events) == ["skipped:"])
+    }
+
+    @Test func nextSentenceAnswersByVoiceAndIsSentWithTheQuestion() async throws {
+        let llm = GatedLLM(answer: askAnswer, autoRelease: true)
+        let (a, sink) = try await makeAnnotator(llm, mode: .chatty, startedAgo: 1000)
+        a.observe(sentence("make this bigger", at: 1))
+        await waitUntil { sink.questions.count == 1 }
+        a.observe(.sentence(id: UUID(), text: "the save one", start: 2000, end: 2001))
+        #expect(answers(sink.events) == ["voice:the save one"])
+        #expect(sink.questions.prefix(2) == ["Which button?", nil])
+        await waitUntil { await llm.count == 2 }
+        let second = try #require(await llm.sentence(1))
+        #expect(second.contains("You asked: Which button?"))
+        #expect(second.contains("Reviewer just said: the save one"))
+    }
+
+    @Test func onlyOneQuestionAtATime() async throws {
+        let (a, sink) = try await makeAnnotator(GatedLLM(answer: askAnswer, autoRelease: true), mode: .chatty, startedAgo: 1000)
+        a.observe(sentence("make this bigger", at: 1))
+        await waitUntil { sink.marks.count == 1 }
+        a.observe(sentence("and that one", at: 3))   // started before the question: not an answer
+        await waitUntil { sink.marks.count == 2 }
+        #expect(sink.questions == ["Which button?"])
+        #expect(sink.spoken == ["Which button?"])
+        #expect(sink.events.filter { if case .aiQuestion = $0 { true } else { false } }.count == 1)
+        #expect(answers(sink.events).isEmpty)
+    }
+
+    @Test func remarksAreRateLimitedAndLoggedWhenSpoken() async throws {
+        let (a, sink) = try await makeAnnotator(GatedLLM(answer: remarkAnswer, autoRelease: true), mode: .chatty)
+        a.observe(sentence("this page", at: 0))
+        await waitUntil { sink.marks.count == 1 }
+        a.observe(sentence("and this", at: 2))
+        await waitUntil { sink.marks.count == 2 }
+        #expect(sink.spoken == ["Now on billing."])
+        let says = sink.events.compactMap { e -> String? in
+            if case let .aiAnnotation(_, _, say) = e { say ?? "-" } else { nil }
+        }
+        #expect(says == ["Now on billing.", "-"])
+    }
+
+    @Test func unansweredQuestionIsSkippedAfterTheTimeout() async throws {
+        let (a, sink) = try await makeAnnotator(GatedLLM(answer: askAnswer, autoRelease: true), mode: .chatty,
+                                                questionTimeout: .milliseconds(50), startedAgo: 1000)
+        a.observe(sentence("make this bigger", at: 1))
+        await waitUntil { sink.questions.count == 2 }
+        #expect(sink.questions == ["Which button?", nil])
+        #expect(answers(sink.events) == ["skipped:"])
+        #expect(a.openQuestion == nil)
+    }
+
+    @Test func stopSkipsAnOpenQuestion() async throws {
+        let (a, sink) = try await makeAnnotator(GatedLLM(answer: askAnswer, autoRelease: true), mode: .chatty, startedAgo: 1000)
+        a.observe(sentence("make this bigger", at: 1))
+        await waitUntil { sink.questions.count == 1 }
+        await a.stop()
+        #expect(a.openQuestion == nil)
+        #expect(sink.questions == ["Which button?", nil])
+        #expect(answers(sink.events) == ["skipped:"])
+    }
+
+    @Test func liveModeNeverSpeaksOrAsks() async throws {
+        let llm = GatedLLM(answer: askAnswer, autoRelease: true)
+        let (a, sink) = try await makeAnnotator(llm, mode: .live)
+        a.observe(sentence("make this bigger", at: 1))
+        await waitUntil { sink.marks.count == 1 }
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(sink.spoken.isEmpty && sink.questions.isEmpty && a.openQuestion == nil)
+        #expect(!sink.events.contains { if case .aiQuestion = $0 { true } else { false } })
+        let system = await llm.requests.first?.system
+        #expect(system == AnnotateRequest.systemPrompt)
     }
 }
