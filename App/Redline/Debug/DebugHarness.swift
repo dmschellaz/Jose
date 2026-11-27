@@ -10,12 +10,13 @@ private final class EventLog {
 /// Runs services for a few seconds outside a real session and shows what they produced.
 @MainActor
 enum DebugHarness {
-    static func run(_ services: [any SessionService], seconds: Double, title: String,
+    static func run(_ services: [any SessionService], seconds: Double, title: String, mode: SessionMode = .manual,
                     extra: (@MainActor (SessionContext) async -> Void)? = nil) async {
         let root = FileManager.default.temporaryDirectory.appending(path: "redline-debug")
         guard let folder = try? SessionFolder.create(root: root, slug: "debug", date: Date()) else { return }
         let log = EventLog()
-        let context = SessionContext(folder: folder, clock: SessionClock(startedAt: Date()), emit: { log.events.append($0) })
+        let context = SessionContext(folder: folder, clock: SessionClock(startedAt: Date()), mode: mode,
+                                     emit: { log.events.append($0) })
         do {
             for s in services { try await s.start(context: context) }
         } catch {
