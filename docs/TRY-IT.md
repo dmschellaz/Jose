@@ -47,6 +47,13 @@ The island then shows **Feedback ready**, what's on your clipboard, and a line l
 
 To throw a session away: **Cancel** on the island (click twice) or **Cancel Session** in the menu.
 
+## 4b. Try Live mode
+
+1. In the menu bar menu, set **Mode** to **Live**. Live needs an API key. You can pick the live model in Settings → Live mode: Haiku 5.5 is the default and the cheapest, Sonnet 5.5 is more accurate.
+2. Start a session and talk about something on screen, e.g. "this button is too small". About a second after you finish the sentence, a blue circle, box, arrow or highlight with a short label appears over what the AI thinks you mean. It fades after 6 s.
+3. A blue dot by the timer means a request is in flight. An orange dot with "AI offline" means the last one failed or timed out. Recording carries on either way.
+4. In the report, blue marks appear in the screenshots with their labels. The island shows a second "Live:" cost line.
+
 ## 5. Look at the result
 
 Click the notification, or menu → **Recent Sessions**. Each session is a folder in `~/Feedback/`, for example `~/Feedback/localhost-3000-2026-11-22-1430/`:

@@ -54,8 +54,46 @@ private let item = FeedbackItem(title: "Billing card padding is too tight", mome
         .momentMarked(t: 5),
         .userMark(Annotation(shape: .rect(.zero), caption: nil, author: .user, createdAt: 6, displayID: 1)),
         .keyframe(KeyframeRef(id: UUID(), file: "k.png", t: 7, displayID: 1), reason: .periodic),
+        .aiAnnotation(sentenceID: UUID(), annotations: [
+            Annotation(shape: .rect(.zero), caption: "Billing card", author: .ai, createdAt: 8, displayID: 1),
+            Annotation(shape: .arrow(from: .zero, to: .zero), caption: "Save button", author: .ai, createdAt: 8, displayID: 1),
+        ], say: nil),
+        .aiAnnotation(sentenceID: UUID(), annotations: [
+            Annotation(shape: .circle(center: .zero, radius: 3), caption: nil, author: .ai, createdAt: 9, displayID: 1),
+        ], say: nil),
+        .aiAnnotation(sentenceID: UUID(), annotations: [], say: "nothing to mark"),
     ])
-    #expect(lines.map(\.text) == ["hello", "(click)", "(opened /settings)", "(marked moment)", "(drew on screen)"])
+    #expect(lines.map(\.text) == ["hello", "(click)", "(opened /settings)", "(marked moment)", "(drew on screen)",
+                                  "(AI marked \"Billing card\", \"Save button\")", "(AI marked the screen)"])
+    #expect(lines.last?.t == 9)
+}
+
+@Test func renderedTranscriptShowsAIMarks() {
+    let transcript = TranscriptBuilder.lines([
+        .sentence(id: UUID(), text: "this card is cramped", start: 12, end: 14),
+        .aiAnnotation(sentenceID: UUID(), annotations: [
+            Annotation(shape: .rect(.zero), caption: "Billing card", author: .ai, createdAt: 14, displayID: 1),
+        ], say: nil),
+    ])
+    let ctx = ReportContext(appName: "app", startURL: nil, startedAt: Date(timeIntervalSince1970: 0), duration: 20,
+                            mode: .live, transcript: transcript, imageFiles: [:], timeZone: .gmt)
+    #expect(MarkdownRenderer.render(items: [], context: ctx).hasSuffix("""
+    ## Full transcript
+    [00:12] this card is cramped
+    [00:14] (AI marked "Billing card")
+
+    """))
+}
+
+@Test func fallbackItemsMentionLiveAIMarks() {
+    var m = Moment(id: 1, start: 0, end: 2, sentences: [SentenceRef(id: UUID(), text: "fix this", start: 0, end: 2)])
+    m.aiMarks = [
+        Annotation(shape: .rect(.zero), caption: "Billing card", author: .ai, createdAt: 2, displayID: 1),
+        Annotation(shape: .rect(.zero), caption: nil, author: .ai, createdAt: 2, displayID: 1),
+        Annotation(shape: .rect(.zero), caption: "Save button", author: .ai, createdAt: 2, displayID: 1),
+    ]
+    #expect(FallbackReport.items(from: [m])[0].problem ==
+            "AI write-up unavailable. See the quote and screenshot. Live AI marked: \"Billing card\", \"Save button\".")
 }
 
 @Test func fallbackItemsComeFromMoments() {

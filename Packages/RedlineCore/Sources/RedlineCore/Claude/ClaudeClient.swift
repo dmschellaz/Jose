@@ -43,7 +43,13 @@ public struct MessagesRequest: Encodable, Sendable {
     public var max_tokens: Int
     public var system: String?
     public var messages: [Message]
+    public struct Thinking: Encodable, Sendable {
+        public var type: String
+        public init(type: String) { self.type = type }
+    }
     public var output_config: OutputConfig?
+    /// nil leaves the model's default. Live mode turns thinking off for speed.
+    public var thinking: Thinking? = nil
     /// "default" enables server-side refusal fallbacks (needs the beta header).
     public var fallbacks: String?
 }

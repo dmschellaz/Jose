@@ -10,6 +10,9 @@ public struct ReportResult: Equatable, Sendable {
     public var tokens: TokenUsage
     /// The model that wrote the report, when the AI ran.
     public var model: String?
+    /// Tokens spent by Live mode during the session (separate from the report call), and its model.
+    public var liveTokens: TokenUsage = TokenUsage()
+    public var liveModel: String?
 
     /// Estimated API cost in US dollars, when the model's price is known.
     public var costUSD: Double? { model.flatMap { Pricing.cost(model: $0, tokens: tokens) } }

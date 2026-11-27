@@ -18,7 +18,11 @@ public enum TranscriptBuilder {
             case let .urlChanged(url, _, t): return TranscriptLine(t: t, text: "(opened \(FallbackReport.pathOf(url)))")
             case let .momentMarked(t): return TranscriptLine(t: t, text: "(marked moment)")
             case let .userMark(a): return TranscriptLine(t: a.createdAt, text: "(drew on screen)")
-            case .keyframe, .aiAnnotation: return nil
+            case let .aiAnnotation(_, anns, _):
+                guard !anns.isEmpty else { return nil }
+                let captions = FallbackReport.quotedCaptions(anns)
+                return TranscriptLine(t: e.time, text: captions.isEmpty ? "(AI marked the screen)" : "(AI marked \(captions))")
+            case .keyframe: return nil
             }
         }
     }

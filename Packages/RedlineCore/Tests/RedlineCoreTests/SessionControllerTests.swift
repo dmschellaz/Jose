@@ -92,6 +92,44 @@ final class FakeBuilder: ReportBuilding, @unchecked Sendable {
         #expect(saved.metadata.tokens == TokenUsage(input: 5, output: 1))
     }
 
+    @Test func reviewHoldsReportThenWritesOnlySelectedSentences() async throws {
+        let service = FakeService(), builder = FakeBuilder()
+        let (c, _) = makeController(service: service, builder: builder)
+        c.holdReportForReview = true
+        await c.start(mode: .live)
+        let keep = UUID(), drop = UUID()
+        c.handle(.sentence(id: keep, text: "keep me", start: 1, end: 2))
+        c.handle(.sentence(id: drop, text: "drop me", start: 3, end: 4))
+        c.handle(.aiAnnotation(sentenceID: drop, annotations: [Annotation(shape: .rect(.zero), caption: "x", author: .ai,
+                                                                         createdAt: 4, displayID: 1)], say: nil))
+        await c.stop()
+        #expect(c.state == .reviewing)
+        #expect(builder.document == nil)
+        let folder = try #require(c.lastFolder)
+        await c.start(mode: .manual)   // ignored while reviewing
+        #expect(c.state == .reviewing)
+
+        await c.writeReport(including: [keep])
+        guard case .done = c.state else { Issue.record("expected done"); return }
+        let doc = try #require(builder.document)
+        let texts = doc.events.compactMap { e -> String? in if case let .sentence(_, t, _, _) = e { t } else { nil } }
+        #expect(texts == ["keep me"])
+        #expect(!doc.events.contains { if case .aiAnnotation = $0 { true } else { false } })
+        // session.json keeps everything
+        let saved = try SessionStore.load(from: folder)
+        #expect(saved.events.filter { if case .sentence = $0 { true } else { false } }.count == 2)
+    }
+
+    @Test func endReviewLeavesSessionOnDisk() async throws {
+        let (c, _) = makeController()
+        c.holdReportForReview = true
+        await c.start(mode: .manual)
+        await c.stop()
+        c.endReview()
+        #expect(c.state == .idle)
+        #expect(FileManager.default.fileExists(atPath: try #require(c.lastFolder).documentURL.path))
+    }
+
     @Test func failedStartCleansUp() async {
         let capture = FakeCapture(), service = FakeService()
         service.fail = true
@@ -237,5 +275,77 @@ final class FakeBuilder: ReportBuilding, @unchecked Sendable {
         await c.stop()
         let doc = try #require(builder.document)
         #expect(!doc.events.contains { if case .keyframe(_, .mark) = $0 { true } else { false } })
+    }
+}
+
+@MainActor final class ObservingService: SessionService, TimelineObserving, TokenReporting {
+    var observed: [TimelineEvent] = []
+    var tokensUsed = TokenUsage()
+    var modelUsed: String?
+    var context: SessionContext?
+    func start(context: SessionContext) async throws { self.context = context }
+    func stop() async {}
+    func observe(_ event: TimelineEvent) { observed.append(event) }
+}
+
+@MainActor @Suite struct SessionControllerLiveTests {
+    private func make(_ services: [any SessionService], builder: FakeBuilder = FakeBuilder()) -> SessionController {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        return SessionController(capture: FakeCapture(), services: services, outputRoot: { root }, reportBuilder: { builder },
+                                 now: { Date(timeIntervalSince1970: 1_763_821_800) }, tickInterval: .seconds(3600), clickDelay: .zero)
+    }
+
+    @Test func forwardsAcceptedEventsAndKeyframes() async {
+        let observer = ObservingService()
+        let c = make([observer])
+        await c.start(mode: .live)
+        #expect(observer.context?.mode == .live)
+        let s = TimelineEvent.sentence(id: UUID(), text: "hi", start: 1, end: 2)
+        c.handle(.click(point: .zero, displayID: 1, t: 0.5))
+        c.handle(s)
+        try? await Task.sleep(for: .milliseconds(30))
+        let nonKeyframes = observer.observed.filter { if case .keyframe = $0 { false } else { true } }
+        #expect(nonKeyframes.count == 2)
+        #expect(nonKeyframes.last == s)
+        // the initial keyframe plus the click and sentence keyframes reach observers too
+        #expect(observer.observed.contains { if case .keyframe(_, .sentence) = $0 { true } else { false } })
+        await c.cancel()
+        let count = observer.observed.count
+        c.handle(s)
+        #expect(observer.observed.count == count)
+    }
+
+    @Test func stopSumsLiveTokens() async throws {
+        let a = ObservingService(), b = ObservingService(), builder = FakeBuilder()
+        let c = make([a, FakeService(), b], builder: builder)
+        await c.start(mode: .live)
+        a.tokensUsed = TokenUsage(input: 100, output: 10)
+        b.tokensUsed = TokenUsage(input: 7, output: 3)
+        b.modelUsed = "claude-haiku-5-5"
+        await c.stop()
+        guard case let .done(result) = c.state else { Issue.record("not done: \(c.state)"); return }
+        #expect(result.tokens == TokenUsage(input: 5, output: 1))
+        #expect(result.liveTokens == TokenUsage(input: 107, output: 13))
+        #expect(result.liveModel == "claude-haiku-5-5")
+        let saved = try SessionStore.load(from: try #require(c.lastFolder))
+        #expect(saved.metadata.tokens == TokenUsage(input: 112, output: 14))
+    }
+
+    @Test func liveAnnotatorEndToEnd() async throws {
+        let llm = GatedLLM(autoRelease: true)
+        let annotator = LiveAnnotator(llm: llm, model: "claude-haiku-5-5", frame: { liveTestFrame(t: $0) })
+        var drawn = 0
+        annotator.onMarks = { _ in drawn += 1 }
+        let builder = FakeBuilder()
+        let c = make([annotator], builder: builder)
+        await c.start(mode: .live)
+        c.handle(.sentence(id: UUID(), text: "this", start: 1, end: 2))
+        let start = Date()
+        while drawn == 0 && Date().timeIntervalSince(start) < 2 { try? await Task.sleep(for: .milliseconds(5)) }
+        await c.stop()
+        let doc = try #require(builder.document)
+        #expect(doc.events.contains { if case .aiAnnotation = $0 { true } else { false } })
+        guard case let .done(result) = c.state else { Issue.record("not done"); return }
+        #expect(result.liveTokens == TokenUsage(input: 100, output: 10))
     }
 }

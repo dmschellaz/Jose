@@ -33,9 +33,23 @@ public enum FallbackReport {
         moments.map { m in
             FeedbackItem(title: "Moment \(m.id)", momentIDs: [m.id],
                          location: m.url.map(pathOf) ?? "Unknown page",
-                         problem: "AI write-up unavailable. See the quote and screenshot.",
+                         problem: "AI write-up unavailable. See the quote and screenshot." + liveAINote(m.aiMarks),
                          wanted: "", quote: m.text.isEmpty ? "(no speech)" : m.text, imageCaption: "")
         }
+    }
+
+    /// ` Live AI marked: "Billing card", "Save button".`, or "" if the live AI drew nothing captioned.
+    static func liveAINote(_ marks: [Annotation]) -> String {
+        let captions = quotedCaptions(marks)
+        return captions.isEmpty ? "" : " Live AI marked: \(captions)."
+    }
+
+    /// `"Billing card", "Save button"` for the marks that have a caption.
+    static func quotedCaptions(_ marks: [Annotation]) -> String {
+        marks.compactMap { a -> String? in
+            guard let c = a.caption?.trimmingCharacters(in: .whitespacesAndNewlines), !c.isEmpty else { return nil }
+            return "\"\(c)\""
+        }.joined(separator: ", ")
     }
 
     static func pathOf(_ url: String) -> String {

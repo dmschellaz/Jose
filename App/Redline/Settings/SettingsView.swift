@@ -1,4 +1,5 @@
 import KeyboardShortcuts
+import RedlineCore
 import SwiftUI
 
 struct SettingsView: View {
@@ -20,9 +21,16 @@ struct SettingsView: View {
                     Text("Couldn't save the key to Keychain.").font(.caption).foregroundStyle(.red)
                 }
                 Picker("Report model", selection: $settings.reportModel) {
-                    ForEach(AppSettings.reportModels, id: \.self) { Text($0) }
+                    ForEach(AppSettings.reportModels, id: \.self) { Text(Pricing.displayName($0)) }
                 }
                 Text("Without a key, sessions still save screenshots and the transcript, with no AI write-up.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Live mode") {
+                Picker("Live model", selection: $settings.liveModel) {
+                    ForEach(AppSettings.liveModels, id: \.self) { Text(Self.priceLabel($0)).tag($0) }
+                }
+                Text("Live sends a screenshot of your screen to Claude after each sentence, roughly 2–3k tokens each.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Output") {
@@ -48,6 +56,18 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 460)
         .onAppear { NSApp.activate() }
+    }
+
+    /// "Haiku 5.5 · $0.10 in / $0.50 out per M tokens".
+    private static func priceLabel(_ model: String) -> String {
+        let name = Pricing.displayName(model)
+        guard let input = Pricing.cost(model: model, tokens: TokenUsage(input: 1_000_000)),
+              let output = Pricing.cost(model: model, tokens: TokenUsage(output: 1_000_000)) else { return name }
+        return "\(name) · \(dollars(input)) in / \(dollars(output)) out per M tokens"
+    }
+
+    private static func dollars(_ usd: Double) -> String {
+        usd == usd.rounded() ? String(format: "$%.0f", usd) : String(format: "$%.2f", usd)
     }
 
     private func saveDraft() {

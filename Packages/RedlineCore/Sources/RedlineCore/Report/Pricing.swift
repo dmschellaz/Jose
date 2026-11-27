@@ -9,6 +9,7 @@ public enum Pricing {
         "claude-opus-5-5": (4, 20),
         "claude-opus-5": (5, 25),
         "claude-opus-4-8": (5, 25),
+        "claude-haiku-5-5": (0.1, 0.5),   // prompts up to 100K tokens
     ]
 
     public static func cost(model: String, tokens: TokenUsage) -> Double? {
