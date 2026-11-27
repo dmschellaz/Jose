@@ -139,3 +139,23 @@ private let item = FeedbackItem(title: "Billing card padding is too tight", mome
     #expect(HandoffPrompt.imageFiles(in: "# Feedback\n").isEmpty)
     #expect(text.contains("There are no screenshots."))
 }
+
+@Test func transcriptShowsChattyQuestionsAnswersAndSpokenLines() {
+    let q = UUID()
+    let lines = TranscriptBuilder.lines([
+        .aiAnnotation(sentenceID: UUID(), annotations: [
+            Annotation(shape: .rect(.zero), caption: "Save", author: .ai, createdAt: 1, displayID: 1),
+        ], say: "Now on billing."),
+        .aiQuestion(id: q, sentenceID: UUID(), text: "Which button?", options: ["Save", "Cancel"], t: 2),
+        .questionAnswered(id: q, answer: "Save", via: .click, t: 3),
+        .questionAnswered(id: UUID(), answer: "the save one", via: .voice, t: 4),
+        .questionAnswered(id: UUID(), answer: "", via: .skipped, t: 5),
+    ])
+    #expect(lines.map(\.text) == [
+        "(AI marked \"Save\" and said \"Now on billing.\")",
+        "(AI asked \"Which button?\", options: \"Save\", \"Cancel\")",
+        "(picked \"Save\")",
+        "(question skipped)",
+    ])
+    #expect(lines.map(\.t) == [1, 2, 3, 5])
+}

@@ -18,10 +18,21 @@ public enum TranscriptBuilder {
             case let .urlChanged(url, _, t): return TranscriptLine(t: t, text: "(opened \(FallbackReport.pathOf(url)))")
             case let .momentMarked(t): return TranscriptLine(t: t, text: "(marked moment)")
             case let .userMark(a): return TranscriptLine(t: a.createdAt, text: "(drew on screen)")
-            case let .aiAnnotation(_, anns, _):
+            case let .aiAnnotation(_, anns, say):
                 guard !anns.isEmpty else { return nil }
                 let captions = FallbackReport.quotedCaptions(anns)
-                return TranscriptLine(t: e.time, text: captions.isEmpty ? "(AI marked the screen)" : "(AI marked \(captions))")
+                var text = captions.isEmpty ? "(AI marked the screen" : "(AI marked \(captions)"
+                if let say, !say.isEmpty { text += " and said \"\(say)\"" }
+                return TranscriptLine(t: e.time, text: text + ")")
+            case let .aiQuestion(_, _, text, options, t):
+                let choices = options.map { "\"\($0)\"" }.joined(separator: ", ")
+                return TranscriptLine(t: t, text: "(AI asked \"\(text)\", options: \(choices))")
+            case let .questionAnswered(_, answer, via, t):
+                switch via {
+                case .click: return TranscriptLine(t: t, text: "(picked \"\(answer)\")")
+                case .voice: return nil   // the answer is the reviewer's next sentence, already listed
+                case .skipped: return TranscriptLine(t: t, text: "(question skipped)")
+                }
             case .keyframe: return nil
             }
         }
