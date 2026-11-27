@@ -22,6 +22,7 @@ final class VoiceService: NSObject, SessionService {
     private var pending: [ObjectIdentifier: AVSpeechUtterance] = [:]
     /// Cut-off utterances whose didCancel hasn't arrived yet; their callbacks are ignored.
     private var draining: [ObjectIdentifier: AVSpeechUtterance] = [:]
+    private var watchdogs: [ObjectIdentifier: Task<Void, Never>] = [:]
     /// True when speaking lifted the session's mute, so it is put back afterwards.
     private var liftedMute = false
     private var active = false
@@ -59,9 +60,13 @@ final class VoiceService: NSObject, SessionService {
         // Watchdog: if no callback ever arrives, don't leave the mic gate closed and the mute lifted.
         let words = Double(line.split(whereSeparator: \.isWhitespace).count)
         let limit = max(6, words * 0.5 + 4)
-        Task { @MainActor [weak self] in
+        watchdogs[id] = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(limit))
-            self?.ended(id)
+            // A line queued behind others may still be waiting its turn: only give up once the synthesizer is quiet.
+            while let self, !Task.isCancelled, self.pending[id] != nil || self.draining[id] != nil {
+                if !self.synthesizer.isSpeaking { self.ended(id); return }
+                try? await Task.sleep(for: .seconds(2))
+            }
         }
     }
 
@@ -94,12 +99,15 @@ final class VoiceService: NSObject, SessionService {
     }
 
     fileprivate func ended(_ id: ObjectIdentifier) {
+        watchdogs.removeValue(forKey: id)?.cancel()
         if draining.removeValue(forKey: id) != nil { return }
         guard pending.removeValue(forKey: id) != nil, pending.isEmpty else { return }
         finish(remute: true)
     }
 
     private func cutOff(remute: Bool) {
+        for task in watchdogs.values { task.cancel() }
+        watchdogs = [:]
         draining.merge(pending) { old, _ in old }
         pending = [:]
         synthesizer.stopSpeaking(at: .immediate)
