@@ -10,6 +10,10 @@ final class AppModel {
     private(set) var isStarting = false
     /// Live annotation health, for the island's status dot. LiveAnnotator.onStatus feeds this.
     private(set) var liveStatus: LiveStatus = .idle
+    /// Chatty: the question shown in the island, if any. LiveAnnotator.onQuestion feeds this.
+    private(set) var openQuestion: ChattyConversation.Question?
+    /// Chatty: true while a line is being spoken (shows "Stop talking").
+    private(set) var isSpeaking = false
     @ObservationIgnored private var isRegenerating = false
     @ObservationIgnored private(set) var controller: SessionController!
 
@@ -18,6 +22,7 @@ final class AppModel {
     @ObservationIgnored private let context = ContextService()
     @ObservationIgnored private let speech = SpeechService()
     @ObservationIgnored private var live: LiveAnnotator!
+    @ObservationIgnored private var voice: VoiceService!
     @ObservationIgnored private let pill = RecordingPillController()
     @ObservationIgnored private let onboarding = OnboardingWindowController()
     let paste = PasteSequencer()
@@ -34,9 +39,11 @@ final class AppModel {
     init() {
         let settings = self.settings
         live = LiveAnnotator(llm: nil, model: settings.liveModel, frame: { [capture] t in await capture.liveFrame(near: t) })
+        voice = VoiceService(gate: speech.gate)
         controller = SessionController(
             capture: capture,
-            services: [overlay, context, speech, live, feed],   // stop order is reversed: live, then speech flushes
+            // Stop order is reversed: the voice goes quiet, live skips an open question, then speech flushes.
+            services: [overlay, context, speech, live, voice, feed],
             outputRoot: { settings.outputRoot },
             reportBuilder: { Self.makeReportBuilder(settings) })
         controller.holdReportForReview = true   // the island lists the sentences; the user picks, then copies
@@ -45,6 +52,9 @@ final class AppModel {
         live.onMarks = { [overlay] marks in for m in marks { overlay.display(m, lifetime: 6) } }
         live.onStatus = { [weak self] in self?.setLiveStatus($0) }
         live.onResult = { [feed] id, frame, marks in feed.liveResult(sentenceID: id, frame: frame, marks: marks) }
+        live.onSpeak = { [weak self] in self?.voice.speak($0) }
+        live.onQuestion = { [weak self] in self?.openQuestion = $0 }
+        voice.onSpeakingChanged = { [weak self] in self?.isSpeaking = $0 }
         paste.onFinished = { [pill] in pill.hide(after: .seconds(2)) }
     }
 
@@ -77,6 +87,7 @@ final class AppModel {
         await controller.cancel()
         SystemAudio.restoreOutput()
         liveStatus = .idle
+        openQuestion = nil
         if wasActive { pill.hide() }
         partialTranscript = ""
     }
@@ -90,6 +101,15 @@ final class AppModel {
     func showOnboarding() { onboarding.show() }
 
     func setLiveStatus(_ status: LiveStatus) { liveStatus = status }
+
+    /// Chatty: the reviewer clicked an option in the island.
+    func answerQuestion(_ id: UUID, _ option: String) { live.answerQuestion(id, option) }
+
+    /// Chatty: the reviewer clicked Skip.
+    func skipQuestion(_ id: UUID) { live.skipQuestion(id) }
+
+    /// Chatty: "Stop talking" in the island.
+    func stopTalking() { voice.stopTalking() }
 
     func regenerateLast() async {
         guard let url = lastSessionFolder, !isRegenerating, !isFinalizing, !isRecording else { return }
@@ -127,15 +147,17 @@ final class AppModel {
             return
         }
         let mode = settings.sessionMode
-        if mode == .live && settings.apiKey() == nil {
-            Notifier.post(title: "Can't start Live mode",
-                          body: "Live mode needs a Claude API key. Add one in Settings, or switch to Manual.", folder: nil)
+        if mode != .manual && settings.apiKey() == nil {
+            Notifier.post(title: "Can't start \(mode.title) mode",
+                          body: "\(mode.title) mode needs a Claude API key. Add one in Settings, or switch to Manual.", folder: nil)
             return
         }
         isStarting = true
         defer { isStarting = false }
         liveStatus = .idle
-        feed.expectsLiveResults = mode == .live
+        openQuestion = nil
+        feed.expectsLiveResults = mode != .manual
+        voice.voiceIdentifier = settings.voiceIdentifier
         live.configure(llm: mode == .manual ? nil : settings.apiKey().map { ClaudeHTTPClient(apiKey: $0) }, model: settings.liveModel)
         await controller.start(mode: mode)
         guard controller.isRecording else {
@@ -156,6 +178,7 @@ final class AppModel {
         await controller.stop()
         SystemAudio.restoreOutput()
         liveStatus = .idle
+        openQuestion = nil
         partialTranscript = ""
         guard controller.state == .reviewing, let folder = controller.lastFolder else {
             pill.hide()
