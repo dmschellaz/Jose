@@ -48,7 +48,9 @@ final class AppSettings {
         sessionMode = storedMode.flatMap { Self.availableModes.contains($0) ? $0 : nil } ?? .manual
         let storedLive = defaults.string(forKey: "liveModel")
         liveModel = storedLive.flatMap { Self.liveModels.contains($0) ? $0 : nil } ?? Self.liveModels[0]
-        voiceIdentifier = defaults.string(forKey: "voiceIdentifier")
+        // Keep the saved voice only if the picker can still offer it; otherwise use the system default.
+        let storedVoice = defaults.string(forKey: "voiceIdentifier")
+        voiceIdentifier = storedVoice.flatMap { id in VoiceService.voices().contains { $0.identifier == id } ? id : nil }
         hasAPIKey = KeychainStore.load() != nil
     }
 

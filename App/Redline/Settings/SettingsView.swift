@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Bindable var settings: AppSettings
     @State private var keyDraft = ""
     @State private var saveFailed = false
+    @State private var voices = VoiceService.voices()
 
     var body: some View {
         Form {
@@ -37,7 +38,7 @@ struct SettingsView: View {
             Section("Chatty mode") {
                 Picker("Voice", selection: $settings.voiceIdentifier) {
                     Text("System default").tag(String?.none)
-                    ForEach(VoiceService.voices(), id: \.identifier) { voice in
+                    ForEach(voices, id: \.identifier) { voice in
                         Text(Self.voiceLabel(voice)).tag(String?.some(voice.identifier))
                     }
                 }
