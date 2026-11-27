@@ -217,6 +217,17 @@ private func near(_ a: CGRect, _ b: CGRect) -> Bool {
         #expect(a.question?.options == ["Billing card", "The profile card on", "Team card"])
     }
 
+    @Test func parseAnswerCapsQuestionTextToOneShortLine() throws {
+        let text = #"{"marks":[],"say":"","question":{"text":"one two three four five\nsix seven eight nine ten eleven twelve thirteen","options":["A","B"]}}"#
+        let a = try AnnotateRequest.parseAnswer(text, frame: liveTestFrame(), createdAt: 0)
+        #expect(a.question?.text == "one two three four five six seven eight nine ten eleven twelve")
+    }
+
+    @Test func chattyPromptDoesNotDescribeTheMark() {
+        #expect(!AnnotateRequest.chattyPrompt.contains("I marked the left card"))
+        #expect(AnnotateRequest.chattyPrompt.contains("Did you mean the left card?"))
+    }
+
     @Test func parseAnswerDropsQuestionsWithoutTwoOptions() throws {
         func question(_ q: String) throws -> LiveQuestion? {
             try AnnotateRequest.parseAnswer(#"{"marks":[],"say":"","question":"# + q + "}", frame: liveTestFrame(), createdAt: 0).question

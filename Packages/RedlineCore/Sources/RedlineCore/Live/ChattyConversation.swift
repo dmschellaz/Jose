@@ -87,6 +87,6 @@ public struct ChattyConversation: Sendable {
         let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !line.isEmpty, let q = open, start >= q.askedAt else { return nil }
         open = nil
-        return (q, .questionAnswered(id: q.id, answer: text, via: .voice, t: t))
+        return (q, .questionAnswered(id: q.id, answer: line, via: .voice, t: t))
     }
 }

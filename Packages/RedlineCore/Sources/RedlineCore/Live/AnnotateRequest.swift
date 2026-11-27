@@ -39,7 +39,7 @@ public enum AnnotateRequest {
     public static let chattyPrompt = """
     Chatty mode is on: as well as marking, you can talk to the reviewer. What you put in say and question is read aloud.
     - say: one short line of at most 12 words, or "" to stay silent. Stay silent most of the time and just mark. \
-    Speak only when your mark might be wrong ("I marked the left card. Is that it?") or when the reviewer has \
+    Speak only when your mark might be wrong ("Did you mean the left card?") or when the reviewer has \
     moved on to a new topic or page ("Now looking at billing."). Never repeat their words or describe your mark.
     - question: ask only when two or more things on screen fit what they said, or when the change they want is \
     unclear. text is the question, at most 12 words, and must make sense heard on its own. options are 2 or 3 \
@@ -180,7 +180,7 @@ public enum AnnotateRequest {
     }
 
     private static func liveQuestion(_ q: Question) -> LiveQuestion? {
-        let text = q.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = words(q.text, max: maxSayWords)
         var options: [String] = []
         for option in q.options.map({ words($0, max: maxOptionWords) }) where !option.isEmpty {
             if !options.contains(where: { $0.caseInsensitiveCompare(option) == .orderedSame }) { options.append(option) }

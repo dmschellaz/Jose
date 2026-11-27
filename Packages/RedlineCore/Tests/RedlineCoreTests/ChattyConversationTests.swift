@@ -94,6 +94,15 @@ private let which = LiveQuestion(text: "Which button?", options: ["Save", "Cance
         #expect(c.open == nil)
     }
 
+    @Test func voiceAnswerStoresTheTrimmedLine() throws {
+        var c = ChattyConversation()
+        _ = c.respond(say: "", question: which, sentenceID: sentence, at: 5)
+        let outcome = c.voiceAnswer(text: "  the save one \n", start: 5.5, at: 7)
+        let out = try #require(outcome)
+        guard case let .questionAnswered(_, answer, _, _) = out.event else { Issue.record("wrong event"); return }
+        #expect(answer == "the save one")
+    }
+
     @Test func voiceAnswerStartingExactlyWhenAskedCounts() throws {
         var c = ChattyConversation()
         let qOut = c.respond(say: "", question: which, sentenceID: sentence, at: 5)
