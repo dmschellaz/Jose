@@ -6,8 +6,8 @@ import RedlineCore
 final class AppSettings {
     static let reportModels = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"]
     static let liveModels = ["claude-haiku-5-5", "claude-sonnet-5-5"]
-    /// Modes the user can pick today. Chatty isn't built yet.
-    static let availableModes: [SessionMode] = [.manual, .live]
+    /// Modes the user can pick.
+    static let availableModes: [SessionMode] = [.manual, .live, .chatty]
     private let defaults = UserDefaults.standard
 
     var outputRoot: URL {
@@ -31,6 +31,10 @@ final class AppSettings {
     var liveModel: String {
         didSet { defaults.set(liveModel, forKey: "liveModel") }
     }
+    /// Chatty's voice (an AVSpeechSynthesisVoice identifier); nil uses the system default.
+    var voiceIdentifier: String? {
+        didSet { defaults.set(voiceIdentifier, forKey: "voiceIdentifier") }
+    }
     private(set) var hasAPIKey: Bool
 
     init() {
@@ -44,6 +48,7 @@ final class AppSettings {
         sessionMode = storedMode.flatMap { Self.availableModes.contains($0) ? $0 : nil } ?? .manual
         let storedLive = defaults.string(forKey: "liveModel")
         liveModel = storedLive.flatMap { Self.liveModels.contains($0) ? $0 : nil } ?? Self.liveModels[0]
+        voiceIdentifier = defaults.string(forKey: "voiceIdentifier")
         hasAPIKey = KeychainStore.load() != nil
     }
 

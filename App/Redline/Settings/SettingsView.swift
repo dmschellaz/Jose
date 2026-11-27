@@ -1,3 +1,4 @@
+import AVFoundation
 import KeyboardShortcuts
 import RedlineCore
 import SwiftUI
@@ -33,6 +34,17 @@ struct SettingsView: View {
                 Text("Live sends a screenshot of your screen to Claude after each sentence, roughly 2–3k tokens each.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section("Chatty mode") {
+                Picker("Voice", selection: $settings.voiceIdentifier) {
+                    Text("System default").tag(String?.none)
+                    ForEach(VoiceService.voices(), id: \.identifier) { voice in
+                        Text(Self.voiceLabel(voice)).tag(String?.some(voice.identifier))
+                    }
+                }
+                Button("Preview") { VoiceService.preview(voiceIdentifier: settings.voiceIdentifier) }
+                Text("Chatty is Live plus a voice. It speaks a short line only when it's unsure or you change topic, and may ask which thing you mean. It uses the live model above. More voices: System Settings → Accessibility → Spoken Content.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Output") {
                 LabeledContent("Folder", value: (settings.outputRoot.path as NSString).abbreviatingWithTildeInPath)
                 Button("Choose…") { chooseFolder() }
@@ -64,6 +76,16 @@ struct SettingsView: View {
         guard let input = Pricing.cost(model: model, tokens: TokenUsage(input: 1_000_000)),
               let output = Pricing.cost(model: model, tokens: TokenUsage(output: 1_000_000)) else { return name }
         return "\(name) · \(dollars(input)) in / \(dollars(output)) out per M tokens"
+    }
+
+    /// "Samantha · en-US (Enhanced)".
+    private static func voiceLabel(_ voice: AVSpeechSynthesisVoice) -> String {
+        let base = "\(voice.name) · \(voice.language)"
+        switch voice.quality {
+        case .premium: return base + " (Premium)"
+        case .enhanced: return base + " (Enhanced)"
+        default: return base
+        }
     }
 
     private static func dollars(_ usd: Double) -> String {
