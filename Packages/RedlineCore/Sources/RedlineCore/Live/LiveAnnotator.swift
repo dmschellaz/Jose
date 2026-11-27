@@ -125,7 +125,7 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
                 onQuestion?(nil)
                 answering = answered.question.text
             }
-            let job = Job(sentenceID: id, text: text, start: start, end: end, recent: recent, clicks: clicks, url: url,
+            var job = Job(sentenceID: id, text: text, start: start, end: end, recent: recent, clicks: clicks, url: url,
                           answering: answering)
             recent.append(text)
             if recent.count > Self.contextSentences { recent.removeFirst(recent.count - Self.contextSentences) }
@@ -133,7 +133,10 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
             if inFlight == nil {
                 send(job)
             } else {
-                if let skipped = queued { onResult?(skipped.sentenceID, nil, []) }   // newest wins
+                if let skipped = queued {   // newest wins, but a voice answer it carried is not lost
+                    onResult?(skipped.sentenceID, nil, [])
+                    job.answering = job.answering ?? skipped.answering
+                }
                 queued = job
             }
         case let .click(point, displayID, _):
@@ -227,7 +230,9 @@ public final class LiveAnnotator: SessionService, TimelineObserving, TokenReport
             status = .ok
             seenMarks = marks
             let outcome = chatty
-                ? conversation.respond(say: answer.say, question: answer.question, sentenceID: job.sentenceID,
+                ? conversation.respond(say: answer.say,
+                                       question: queued == nil ? answer.question : nil,   // stale: reviewer moved on
+                                       sentenceID: job.sentenceID,
                                        at: context.clock.now())
                 : ChattyConversation.Outcome()
             if !marks.isEmpty {

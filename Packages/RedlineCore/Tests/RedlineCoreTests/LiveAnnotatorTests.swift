@@ -332,4 +332,35 @@ private func answers(_ events: [TimelineEvent]) -> [String] {
         let system = await llm.requests.first?.system
         #expect(system == AnnotateRequest.systemPrompt)
     }
+
+    @Test func voiceAnswerSurvivesBeingReplacedInTheQueue() async throws {
+        let llm = GatedLLM(answer: askAnswer)
+        let (a, sink) = try await makeAnnotator(llm, mode: .chatty, startedAgo: 1000)
+        a.observe(sentence("make this bigger", at: 1))
+        await waitUntil { await llm.count == 1 }
+        await llm.release(0)
+        await waitUntil { sink.questions.count == 1 }
+        a.observe(sentence("and that", at: 3))                       // B: in flight
+        await waitUntil { await llm.count == 2 }
+        a.observe(.sentence(id: UUID(), text: "the save one", start: 2000, end: 2001))   // C: answers, queued
+        a.observe(.sentence(id: UUID(), text: "yes that", start: 2002, end: 2003))       // D replaces C
+        await llm.release(1)
+        await waitUntil { await llm.count == 3 }
+        await llm.release(2)
+        let d = try #require(await llm.sentence(2))
+        #expect(d.contains("Reviewer just said: yes that"))
+        #expect(d.contains("You asked: Which button?"))
+    }
+
+    @Test func staleResponseDoesNotOpenAQuestionWhenANewerSentenceIsQueued() async throws {
+        let llm = GatedLLM(answer: askAnswer)
+        let (a, sink) = try await makeAnnotator(llm, mode: .chatty, startedAgo: 1000)
+        a.observe(sentence("make this bigger", at: 1))
+        await waitUntil { await llm.count == 1 }
+        a.observe(sentence("never mind, next", at: 3))   // queued behind the first
+        await llm.release(0)
+        await waitUntil { sink.marks.count == 1 }
+        #expect(!sink.events.contains { if case .aiQuestion = $0 { true } else { false } })
+        #expect(sink.questions.isEmpty && sink.spoken.isEmpty && a.openQuestion == nil)
+    }
 }
